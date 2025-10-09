@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface Todo {
   id: number;
@@ -11,6 +11,31 @@ function App() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [filter, setFilter] = useState<"all" | "active" | "completed">("all");
+
+  // Load todos from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedTodos = localStorage.getItem('todos');
+      if (savedTodos) {
+        const parsedTodos = JSON.parse(savedTodos).map((todo: any) => ({
+          ...todo,
+          createdAt: new Date(todo.createdAt)
+        }));
+        setTodos(parsedTodos);
+      }
+    } catch (error) {
+      console.error('Failed to load todos:', error);
+    }
+  }, []);
+
+  // Save todos to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('todos', JSON.stringify(todos));
+    } catch (error) {
+      console.error('Failed to save todos:', error);
+    }
+  }, [todos]);
 
   const addTodo = (e: React.FormEvent) => {
     e.preventDefault();
