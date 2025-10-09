@@ -7,26 +7,27 @@ function CompactApp() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [firstTodo, setFirstTodo] = useState<Todo | null>(null);
 
-  // Load todos from database and get first todo
+  // Initialize database and load todos
   useEffect(() => {
-    const loadTodos = async () => {
+    const initializeAndLoadTodos = async () => {
       try {
+        // First initialize the database
+        await database.init();
+
+        // Then load todos (only incomplete ones)
         const loadedTodos = await database.getTodos();
-        setTodos(loadedTodos);
-        if (loadedTodos.length > 0) {
-          setFirstTodo(loadedTodos[0]);
+        const incompleteTodos = loadedTodos.filter(todo => !todo.completed);
+        setTodos(incompleteTodos);
+        if (incompleteTodos.length > 0) {
+          setFirstTodo(incompleteTodos[0]);
         }
+        console.log('CompactApp: Loaded', incompleteTodos.length, 'incomplete todos');
       } catch (error) {
-        console.error('Failed to load todos:', error);
+        console.error('Failed to initialize or load todos in CompactApp:', error);
       }
     };
 
-    loadTodos();
-
-    // Set up interval to check for updates
-    const interval = setInterval(loadTodos, 1000);
-
-    return () => clearInterval(interval);
+    initializeAndLoadTodos();
   }, []);
 
   const closeWindow = async () => {
@@ -109,9 +110,7 @@ function CompactApp() {
         <div className="flex-1 min-w-0">
           {firstTodo ? (
             <div>
-              <p className={`text-white text-sm font-medium truncate ${
-                firstTodo.completed ? "line-through opacity-60" : ""
-              }`}>
+              <p className="text-white text-sm font-medium truncate">
                 {firstTodo.text}
               </p>
               <p className="text-xs text-gray-400 truncate">
@@ -120,7 +119,7 @@ function CompactApp() {
             </div>
           ) : (
             <p className="text-gray-400 text-sm truncate">
-              暂无任务 - 点击打开主应用
+              暂无待办任务 - 点击打开主应用
             </p>
           )}
         </div>

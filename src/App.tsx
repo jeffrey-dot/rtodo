@@ -2,11 +2,47 @@ import { useState, useEffect } from "react";
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window';
 import { database, Todo } from './utils/database';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import DraggableTodo from './components/DraggableTodo';
+import DatePicker from './components/DatePicker';
 
 function App() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [filter, setFilter] = useState<"all" | "active" | "completed">("all");
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [historicalDates, setHistoricalDates] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [isViewingHistorical, setIsViewingHistorical] = useState(false);
+
+  // Format date as MM月DD日
+  const formatDate = () => {
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const day = now.getDate();
+    return `${month}月${day}日`;
+  };
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
   // Initialize database and load todos on mount
   useEffect(() => {
@@ -15,6 +51,10 @@ function App() {
         await database.init();
         const loadedTodos = await database.getTodos();
         setTodos(loadedTodos);
+
+        // Load historical dates
+        const dates = await database.getHistoricalDates();
+        setHistoricalDates(dates);
       } catch (error) {
         console.error('Failed to initialize database:', error);
       }
@@ -50,19 +90,7 @@ function App() {
     setupCloseListener();
   }, []);
 
-  const addTodo = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (inputValue.trim()) {
-      try {
-        const newTodo = await database.addTodo(inputValue.trim());
-        setTodos([newTodo, ...todos]);
-        setInputValue("");
-      } catch (error) {
-        console.error('Failed to add todo:', error);
-      }
-    }
-  };
-
+  
   const toggleTodo = async (id: number) => {
     try {
       const updatedTodo = await database.toggleTodo(id);
@@ -89,6 +117,79 @@ function App() {
       setTodos(todos.filter(todo => !todo.completed));
     } catch (error) {
       console.error('Failed to clear completed todos:', error);
+    }
+  };
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (active.id !== over?.id) {
+      const oldIndex = todos.findIndex((todo) => todo.id === active.id);
+      const newIndex = todos.findIndex((todo) => todo.id === over?.id);
+
+      if (oldIndex !== -1 && newIndex !== -1) {
+        const newTodos = arrayMove(todos, oldIndex, newIndex);
+        setTodos(newTodos);
+
+        // Update database with new order
+        try {
+          const todoIds = newTodos.map(todo => todo.id);
+          await database.reorderTodos(todoIds);
+        } catch (error) {
+          console.error('Failed to reorder todos in database:', error);
+          // Revert to original order if database update fails
+          setTodos(todos);
+        }
+      }
+    }
+  };
+
+  const openDatePicker = async () => {
+    try {
+      const dates = await database.getHistoricalDates();
+      setHistoricalDates(dates);
+      setShowDatePicker(true);
+    } catch (error) {
+      console.error('Failed to get historical dates:', error);
+    }
+  };
+
+  const handleDateSelect = async (date: string) => {
+    try {
+      setSelectedDate(date);
+      const historicalTodos = await database.getTodosByDate(date);
+      setTodos(historicalTodos);
+      setIsViewingHistorical(true);
+      setShowDatePicker(false);
+    } catch (error) {
+      console.error('Failed to load historical todos:', error);
+    }
+  };
+
+  const returnToToday = async () => {
+    try {
+      setSelectedDate(null);
+      setIsViewingHistorical(false);
+      const currentTodos = await database.getTodos();
+      setTodos(currentTodos);
+    } catch (error) {
+      console.error('Failed to return to today:', error);
+    }
+  };
+
+  // Override addTodo to prevent adding todos when viewing historical data
+  const handleAddTodo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (inputValue.trim() && !isViewingHistorical) {
+      try {
+        await database.addTodo(inputValue.trim());
+        // Reload all todos to maintain proper sorting order
+        const updatedTodos = await database.getTodos();
+        setTodos(updatedTodos);
+        setInputValue("");
+      } catch (error) {
+        console.error('Failed to add todo:', error);
+      }
     }
   };
 
@@ -138,7 +239,7 @@ function App() {
 
         // Calculate position for top-right 1/8 of screen
         const windowWidth = 500;
-        const windowHeight = 80;
+        const windowHeight = 50;
 
         // Get current monitor information
         const monitor = await currentMonitor();
@@ -215,11 +316,30 @@ function App() {
         <header className="text-center mb-8">
           <div className="flex items-center justify-between mb-4">
             <div className="flex-1">
-              <h1 className="text-3xl font-bold text-white mb-2">
-                ✨ TODO LIST
-              </h1>
+              {isViewingHistorical ? (
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  <button
+                    onClick={returnToToday}
+                    className="px-3 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm"
+                    title="返回今天"
+                  >
+                    ← 返回今天
+                  </button>
+                  <h1 className="text-3xl font-bold text-white">
+                    📅 {selectedDate}
+                  </h1>
+                </div>
+              ) : (
+                <button
+                  onClick={openDatePicker}
+                  className="text-3xl font-bold text-white mb-2 hover:text-blue-400 transition-colors cursor-pointer"
+                  title="点击选择历史日期"
+                >
+                  ✨ {formatDate()}
+                </button>
+              )}
               <p className="text-gray-400 text-sm">
-                Organize your tasks with style
+                {isViewingHistorical ? "历史数据 - 只读模式" : "Organize your tasks with style"}
               </p>
             </div>
             <button
@@ -235,18 +355,28 @@ function App() {
         </header>
 
         {/* Add Todo Form */}
-        <form onSubmit={addTodo} className="mb-8">
+        <form onSubmit={handleAddTodo} className="mb-8">
           <div className="flex gap-2">
             <input
               type="text"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              placeholder="What needs to be done?"
-              className="flex-1 px-3 py-2.5 rounded-lg border border-gray-600 bg-gray-800 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
+              placeholder={isViewingHistorical ? "历史数据模式 - 无法添加任务" : "What needs to be done?"}
+              disabled={isViewingHistorical}
+              className={`flex-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm ${
+                isViewingHistorical
+                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed border-gray-600'
+                  : 'bg-gray-800 text-white border-gray-600'
+              }`}
             />
             <button
               type="submit"
-              className="px-4 py-2.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-gray-800 transition-colors shadow-sm text-sm font-medium"
+              disabled={isViewingHistorical}
+              className={`px-4 py-2.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-gray-800 transition-colors shadow-sm text-sm font-medium ${
+                isViewingHistorical
+                  ? 'bg-gray-600 text-gray-500 cursor-not-allowed'
+                  : 'bg-blue-500 text-white hover:bg-blue-600'
+              }`}
             >
               Add Task
             </button>
@@ -304,43 +434,26 @@ function App() {
               </p>
             </div>
           ) : (
-            filteredTodos.map((todo) => (
-              <div
-                key={todo.id}
-                className="bg-gray-800 rounded-lg p-3 shadow-sm hover:shadow-md transition-shadow"
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={filteredTodos.map(todo => todo.id)}
+                strategy={verticalListSortingStrategy}
               >
-                <div className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={todo.completed}
-                    onChange={() => toggleTodo(todo.id)}
-                    className="w-4 h-4 text-blue-500 rounded focus:ring-blue-400 focus:ring-2 cursor-pointer"
+                {filteredTodos.map((todo) => (
+                  <DraggableTodo
+                    key={todo.id}
+                    todo={todo}
+                    onToggle={toggleTodo}
+                    onDelete={deleteTodo}
+                    readonly={isViewingHistorical}
                   />
-                  <div className="flex-1">
-                    <p
-                      className={`${
-                        todo.completed
-                          ? "line-through text-gray-400"
-                          : "text-white"
-                      } text-sm`}
-                    >
-                      {todo.text}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {todo.createdAt.toLocaleString()}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => deleteTodo(todo.id)}
-                    className="p-1.5 text-red-400 hover:bg-red-900/30 rounded-lg transition-colors"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            ))
+                ))}
+              </SortableContext>
+            </DndContext>
           )}
         </div>
 
@@ -356,6 +469,17 @@ function App() {
           </div>
         )}
       </div>
+
+      {/* Date Picker Modal */}
+      {showDatePicker && (
+        <DatePicker
+          historicalDates={historicalDates}
+          selectedDate={selectedDate}
+          onDateSelect={handleDateSelect}
+          onClose={() => setShowDatePicker(false)}
+          currentDate={new Date().toISOString().split('T')[0]}
+        />
+      )}
     </div>
   );
 }
