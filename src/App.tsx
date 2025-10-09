@@ -1,43 +1,27 @@
 import { useState, useEffect } from "react";
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window';
-
-interface Todo {
-  id: number;
-  text: string;
-  completed: boolean;
-  createdAt: Date;
-}
+import { database, Todo } from './utils/database';
 
 function App() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [filter, setFilter] = useState<"all" | "active" | "completed">("all");
 
-  // Load todos from localStorage on mount
+  // Initialize database and load todos on mount
   useEffect(() => {
-    try {
-      const savedTodos = localStorage.getItem('todos');
-      if (savedTodos) {
-        const parsedTodos = JSON.parse(savedTodos).map((todo: any) => ({
-          ...todo,
-          createdAt: new Date(todo.createdAt)
-        }));
-        setTodos(parsedTodos);
+    const initDatabase = async () => {
+      try {
+        await database.init();
+        const loadedTodos = await database.getTodos();
+        setTodos(loadedTodos);
+      } catch (error) {
+        console.error('Failed to initialize database:', error);
       }
-    } catch (error) {
-      console.error('Failed to load todos:', error);
-    }
-  }, []);
+    };
 
-  // Save todos to localStorage whenever they change
-  useEffect(() => {
-    try {
-      localStorage.setItem('todos', JSON.stringify(todos));
-    } catch (error) {
-      console.error('Failed to save todos:', error);
-    }
-  }, [todos]);
+    initDatabase();
+  }, []);
 
   // Handle main window close event to also close compact window
   useEffect(() => {
@@ -66,32 +50,46 @@ function App() {
     setupCloseListener();
   }, []);
 
-  const addTodo = (e: React.FormEvent) => {
+  const addTodo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (inputValue.trim()) {
-      const newTodo: Todo = {
-        id: Date.now(),
-        text: inputValue.trim(),
-        completed: false,
-        createdAt: new Date(),
-      };
-      setTodos([newTodo, ...todos]);
-      setInputValue("");
+      try {
+        const newTodo = await database.addTodo(inputValue.trim());
+        setTodos([newTodo, ...todos]);
+        setInputValue("");
+      } catch (error) {
+        console.error('Failed to add todo:', error);
+      }
     }
   };
 
-  const toggleTodo = (id: number) => {
-    setTodos(todos.map(todo =>
-      todo.id === id ? { ...todo, completed: !todo.completed } : todo
-    ));
+  const toggleTodo = async (id: number) => {
+    try {
+      const updatedTodo = await database.toggleTodo(id);
+      setTodos(todos.map(todo =>
+        todo.id === id ? updatedTodo : todo
+      ));
+    } catch (error) {
+      console.error('Failed to toggle todo:', error);
+    }
   };
 
-  const deleteTodo = (id: number) => {
-    setTodos(todos.filter(todo => todo.id !== id));
+  const deleteTodo = async (id: number) => {
+    try {
+      await database.deleteTodo(id);
+      setTodos(todos.filter(todo => todo.id !== id));
+    } catch (error) {
+      console.error('Failed to delete todo:', error);
+    }
   };
 
-  const clearCompleted = () => {
-    setTodos(todos.filter(todo => !todo.completed));
+  const clearCompleted = async () => {
+    try {
+      await database.clearCompleted();
+      setTodos(todos.filter(todo => !todo.completed));
+    } catch (error) {
+      console.error('Failed to clear completed todos:', error);
+    }
   };
 
   const openCompactMode = async () => {

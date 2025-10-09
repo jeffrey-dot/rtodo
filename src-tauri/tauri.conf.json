@@ -19,18 +19,8 @@
         "minWidth": 320,
         "minHeight": 480,
         "resizable": true,
-        "decorations": true
-      },
-      {
-        "title": "rtodo-compact",
-        "label": "compact",
-        "url": "/compact",
-        "width": 500,
-        "height": 80,
-        "resizable": false,
-        "decorations": true,
         "center": true,
-        "visible": false
+        "decorations": true
       }
     ],
     "security": {

@@ -1,32 +1,20 @@
 import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
-
-interface Todo {
-  id: number;
-  text: string;
-  completed: boolean;
-  createdAt: Date;
-}
+import { database, Todo } from './utils/database';
 
 function CompactApp() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [firstTodo, setFirstTodo] = useState<Todo | null>(null);
 
-  // Load todos from localStorage and get first todo
+  // Load todos from database and get first todo
   useEffect(() => {
-    const loadTodos = () => {
+    const loadTodos = async () => {
       try {
-        const savedTodos = localStorage.getItem('todos');
-        if (savedTodos) {
-          const parsedTodos = JSON.parse(savedTodos).map((todo: any) => ({
-            ...todo,
-            createdAt: new Date(todo.createdAt)
-          }));
-          setTodos(parsedTodos);
-          if (parsedTodos.length > 0) {
-            setFirstTodo(parsedTodos[0]);
-          }
+        const loadedTodos = await database.getTodos();
+        setTodos(loadedTodos);
+        if (loadedTodos.length > 0) {
+          setFirstTodo(loadedTodos[0]);
         }
       } catch (error) {
         console.error('Failed to load todos:', error);
