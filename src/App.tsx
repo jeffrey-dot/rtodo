@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window';
 
 interface Todo {
   id: number;
@@ -38,6 +39,33 @@ function App() {
     }
   }, [todos]);
 
+  // Handle main window close event to also close compact window
+  useEffect(() => {
+    const handleWindowClose = async () => {
+      try {
+        // Close compact window when main window is closed
+        const compactWindow = await WebviewWindow.getByLabel('compact');
+        if (compactWindow) {
+          await compactWindow.close();
+        }
+      } catch (error) {
+        console.error('Failed to close compact window:', error);
+      }
+    };
+
+    const setupCloseListener = async () => {
+      try {
+        const mainWindow = getCurrentWindow();
+        // Listen for window close event
+        mainWindow.onCloseRequested(handleWindowClose);
+      } catch (error) {
+        console.error('Failed to setup close listener:', error);
+      }
+    };
+
+    setupCloseListener();
+  }, []);
+
   const addTodo = (e: React.FormEvent) => {
     e.preventDefault();
     if (inputValue.trim()) {
@@ -69,30 +97,104 @@ function App() {
   const openCompactMode = async () => {
     console.log('Opening compact mode...');
     try {
-      console.log('Creating new compact window...');
-      const compactWindow = new WebviewWindow('compact', {
-        url: '/compact',
-        width: 500,
-        height: 80,
-        resizable: false,
-        decorations: true,
-        center: true,
-        visible: true
-      });
+      const windowLabel = 'compact';
 
-      console.log('Compact window created:', compactWindow);
-
-      // Wait a moment and then try to show and focus the window
-      setTimeout(async () => {
-        try {
-          console.log('Attempting to show and focus window...');
-          await compactWindow.show();
-          await compactWindow.setFocus();
-          console.log('Window operations completed');
-        } catch (error) {
-          console.error('Failed to show/focus window:', error);
+      // Check if compact window already exists by trying to get it
+      let existingWindow = null;
+      try {
+        existingWindow = WebviewWindow.getByLabel(windowLabel);
+        // Try to interact with window to verify it actually exists
+        if (existingWindow) {
+          await existingWindow.show();
         }
-      }, 100);
+      } catch (error) {
+        console.log('Compact window does not exist, will create new one');
+        existingWindow = null;
+      }
+
+      if (existingWindow) {
+        console.log('Compact window already exists, showing it');
+        try {
+          // Recalculate position for current monitor
+          const monitor = await currentMonitor();
+          const screenWidth = monitor?.size?.width || 1920;
+          const screenHeight = monitor?.size?.height || 1080;
+          const windowWidth = 500;
+
+          // Calculate position: top-right 1/8 of screen, height 1/6 from top
+          // 1/8 from right = screenWidth - (screenWidth / 8) - windowWidth
+          // Minimum 100px from right edge
+          // 1/6 from top = screenHeight / 6
+          const xOffset = Math.min(screenWidth - (screenWidth / 10) - windowWidth, screenWidth - windowWidth - 50);
+          const yOffset = screenHeight / 10; // 1/6 from top
+
+          await existingWindow.setPosition(xOffset, yOffset);
+          await existingWindow.show();
+          await existingWindow.setFocus();
+          console.log('Existing compact window positioned and shown at:', { x: xOffset, y: yOffset });
+        } catch (showError) {
+          console.error('Failed to show existing window:', showError);
+        }
+      } else {
+        console.log('Creating new compact window:', windowLabel);
+
+        // Calculate position for top-right 1/8 of screen
+        const windowWidth = 500;
+        const windowHeight = 80;
+
+        // Get current monitor information
+        const monitor = await currentMonitor();
+
+        // Fallback to default screen size if monitor is null
+        const screenWidth = monitor?.size?.width || 1920;
+        const screenHeight = monitor?.size?.height || 1080;
+
+        // Calculate position: top-right 1/8 of screen, height 1/6 from top
+        // 1/8 from right = screenWidth - (screenWidth / 8) - windowWidth
+        // 1/6 from top = screenHeight / 6
+        const xOffset = screenWidth - (screenWidth / 10) - windowWidth;
+        const yOffset = screenHeight / 8; // 1/6 from top
+
+        console.log('Calculated position:', { x: xOffset, y: yOffset, screenWidth, screenHeight });
+
+        const compactWindow = new WebviewWindow(windowLabel, {
+          url: '/compact',
+          width: windowWidth,
+          height: windowHeight,
+          resizable: false,
+          decorations: false,
+          center: false,
+          visible: true,
+          alwaysOnTop: true,
+          skipTaskbar: true,
+          x: xOffset,
+          y: yOffset
+        });
+
+        // Wait for window to be created and ensure it's positioned correctly
+        compactWindow.once('tauri://created', () => {
+          console.log('Compact window created successfully');
+          compactWindow.setPosition(xOffset, yOffset);
+        });
+
+        console.log('Compact window created:', compactWindow);
+
+        // Additional window operations to ensure visibility
+        setTimeout(async () => {
+          try {
+            await compactWindow.show();
+            await compactWindow.setFocus();
+            await compactWindow.unminimize();
+            console.log('Window operations completed');
+          } catch (error) {
+            console.error('Failed to perform window operations:', error);
+          }
+        }, 100);
+      }
+
+      // Hide main window
+      const mainWebview = getCurrentWindow();
+      await mainWebview.hide();
 
     } catch (error) {
       console.error('Failed to open compact mode:', error);
