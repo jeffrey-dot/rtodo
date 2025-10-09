@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 interface Todo {
   id: number;
@@ -65,6 +66,39 @@ function App() {
     setTodos(todos.filter(todo => !todo.completed));
   };
 
+  const openCompactMode = async () => {
+    console.log('Opening compact mode...');
+    try {
+      console.log('Creating new compact window...');
+      const compactWindow = new WebviewWindow('compact', {
+        url: '/compact',
+        width: 500,
+        height: 80,
+        resizable: false,
+        decorations: true,
+        center: true,
+        visible: true
+      });
+
+      console.log('Compact window created:', compactWindow);
+
+      // Wait a moment and then try to show and focus the window
+      setTimeout(async () => {
+        try {
+          console.log('Attempting to show and focus window...');
+          await compactWindow.show();
+          await compactWindow.setFocus();
+          console.log('Window operations completed');
+        } catch (error) {
+          console.error('Failed to show/focus window:', error);
+        }
+      }, 100);
+
+    } catch (error) {
+      console.error('Failed to open compact mode:', error);
+    }
+  };
+
   const filteredTodos = todos.filter(todo => {
     if (filter === "active") return !todo.completed;
     if (filter === "completed") return todo.completed;
@@ -79,12 +113,25 @@ function App() {
       <div className="container mx-auto px-4 py-6 max-w-md">
         {/* Header */}
         <header className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">
-            ✨ TODO LIST
-          </h1>
-          <p className="text-gray-400 text-sm">
-            Organize your tasks with style
-          </p>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex-1">
+              <h1 className="text-3xl font-bold text-white mb-2">
+                ✨ TODO LIST
+              </h1>
+              <p className="text-gray-400 text-sm">
+                Organize your tasks with style
+              </p>
+            </div>
+            <button
+              onClick={openCompactMode}
+              className="px-3 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+              title="Compact Mode"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              </svg>
+            </button>
+          </div>
         </header>
 
         {/* Add Todo Form */}
