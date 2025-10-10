@@ -76,8 +76,6 @@ function App() {
       try {
         await database.init();
         // Load today's todos only
-        const today = new Date().toISOString().split('T')[0];
-        const todayTodos = await database.getTodosByDate(today);
         store.loadTodos();
 
         // Load historical dates
