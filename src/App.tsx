@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
-import { database, Todo } from './utils/database';
+import { Todo, database } from './utils/database';
+import { store } from './utils/store';
 import {
   DndContext,
   closestCenter,
@@ -22,7 +23,7 @@ import DraggableTodo from './components/DraggableTodo';
 import DatePicker from './components/DatePicker';
 
 function App() {
-  const [todos, setTodos] = useState<Todo[]>([]);
+  const [state, setState] = useState(() => store.getState());
   const [inputValue, setInputValue] = useState("");
   const [filter, setFilter] = useState<"all" | "active" | "completed">("all");
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -48,19 +49,11 @@ function App() {
     return `${year}-${month}-${day}`;
   };
 
-  // Function to sync data from database
+  // Function to sync data from store
   const syncData = async () => {
     try {
-      if (isViewingHistorical && selectedDate) {
-        // If viewing historical data, reload the current historical date
-        const historicalTodos = await database.getTodosByDate(selectedDate);
-        setTodos(historicalTodos);
-      } else {
-        // Otherwise, reload today's todos
-        const today = new Date().toISOString().split('T')[0];
-        const todayTodos = await database.getTodosByDate(today);
-        setTodos(todayTodos);
-      }
+      const date = (isViewingHistorical && selectedDate) ? selectedDate : undefined;
+      await store.loadTodos(date);
 
       // Also refresh historical dates
       const dates = await database.getHistoricalDates();
@@ -77,32 +70,43 @@ function App() {
     })
   );
 
-  // Initialize database and load todos on mount
+  // Initialize store and subscribe to state changes
   useEffect(() => {
-    const initDatabase = async () => {
+    const initializeStore = async () => {
       try {
         await database.init();
-        // Load today's todos only
-        const today = new Date().toISOString().split('T')[0];
-        const todayTodos = await database.getTodosByDate(today);
-        setTodos(todayTodos);
+        await store.loadTodos();
 
         // Load historical dates
         const dates = await database.getHistoricalDates();
         setHistoricalDates(dates);
+
+        // Subscribe to store changes after initialization
+        const unsubscribe = store.subscribe(() => {
+          setState(store.getState());
+        });
+
+        return unsubscribe;
       } catch (error) {
-        console.error('Failed to initialize database:', error);
-        // Fallback to all todos if there's an error
-        try {
-          const allTodos = await database.getTodos();
-          setTodos(allTodos);
-        } catch (fallbackError) {
-          console.error('Failed to load todos:', fallbackError);
-        }
+        console.error('Failed to initialize store:', error);
+        return () => {}; // Return empty cleanup function
       }
     };
 
-    initDatabase();
+    let unsubscribe: (() => void) | undefined;
+
+    initializeStore().then((cleanup) => {
+      unsubscribe = cleanup;
+    }).catch(error => {
+      console.error('Initialization failed:', error);
+    });
+
+    // Cleanup on unmount
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, []);
 
   // Set up event listeners for real-time updates
@@ -126,7 +130,12 @@ function App() {
           syncData();
         });
 
-        unlistenFunctions = [unlistenToggle, unlistenAdd, unlistenDelete];
+        // Listen for todo reordering
+        const unlistenReorder = await listen('todos-reordered', (_event) => {
+          syncData();
+        });
+
+        unlistenFunctions = [unlistenToggle, unlistenAdd, unlistenDelete, unlistenReorder];
       } catch (error) {
         console.error('App: Failed to setup event listeners:', error);
       }
@@ -170,10 +179,7 @@ function App() {
   
   const toggleTodo = async (id: number) => {
     try {
-      const updatedTodo = await database.toggleTodo(id);
-      setTodos(todos.map(todo =>
-        todo.id === id ? updatedTodo : todo
-      ));
+      await store.toggleTodo(id);
     } catch (error) {
       console.error('Failed to toggle todo:', error);
     }
@@ -181,8 +187,7 @@ function App() {
 
   const deleteTodo = async (id: number) => {
     try {
-      await database.deleteTodo(id);
-      setTodos(todos.filter(todo => todo.id !== id));
+      await store.deleteTodo(id);
     } catch (error) {
       console.error('Failed to delete todo:', error);
     }
@@ -190,8 +195,7 @@ function App() {
 
   const clearCompleted = async () => {
     try {
-      await database.clearCompleted();
-      setTodos(todos.filter(todo => !todo.completed));
+      await store.clearCompleted();
     } catch (error) {
       console.error('Failed to clear completed todos:', error);
     }
@@ -201,21 +205,18 @@ function App() {
     const { active, over } = event;
 
     if (active.id !== over?.id) {
-      const oldIndex = todos.findIndex((todo) => todo.id === active.id);
-      const newIndex = todos.findIndex((todo) => todo.id === over?.id);
+      const oldIndex = state.todos.findIndex((todo) => todo.id === active.id);
+      const newIndex = state.todos.findIndex((todo) => todo.id === over?.id);
 
       if (oldIndex !== -1 && newIndex !== -1) {
-        const newTodos = arrayMove(todos, oldIndex, newIndex);
-        setTodos(newTodos);
+        const newTodos = arrayMove(state.todos, oldIndex, newIndex);
 
-        // Update database with new order
+        // Update store with new order
         try {
           const todoIds = newTodos.map(todo => todo.id);
-          await database.reorderTodos(todoIds);
+          await store.reorderTodos(todoIds);
         } catch (error) {
-          console.error('Failed to reorder todos in database:', error);
-          // Revert to original order if database update fails
-          setTodos(todos);
+          console.error('Failed to reorder todos:', error);
         }
       }
     }
@@ -240,13 +241,11 @@ function App() {
         // If selecting today, return to today view
         setSelectedDate(null);
         setIsViewingHistorical(false);
-        const todayTodos = await database.getTodosByDate(today);
-        setTodos(todayTodos);
+        await store.loadTodos();
       } else {
         // If selecting historical date
         setSelectedDate(date);
-        const historicalTodos = await database.getTodosByDate(date);
-        setTodos(historicalTodos);
+        await store.loadTodos(date);
         setIsViewingHistorical(true);
       }
 
@@ -260,19 +259,9 @@ function App() {
     try {
       setSelectedDate(null);
       setIsViewingHistorical(false);
-      // Get today's date in YYYY-MM-DD format
-      const today = new Date().toISOString().split('T')[0];
-      const todayTodos = await database.getTodosByDate(today);
-      setTodos(todayTodos);
+      await store.loadTodos();
     } catch (error) {
       console.error('Failed to return to today:', error);
-      // Fallback to all todos if there's an error
-      try {
-        const allTodos = await database.getTodos();
-        setTodos(allTodos);
-      } catch (fallbackError) {
-        console.error('Failed to load todos:', fallbackError);
-      }
     }
   };
 
@@ -281,11 +270,7 @@ function App() {
     e.preventDefault();
     if (inputValue.trim() && !isViewingHistorical) {
       try {
-        await database.addTodo(inputValue.trim());
-        // Reload today's todos to maintain proper sorting order
-        const today = new Date().toISOString().split('T')[0];
-        const todayTodos = await database.getTodosByDate(today);
-        setTodos(todayTodos);
+        await store.addTodo(inputValue.trim());
         setInputValue("");
       } catch (error) {
         console.error('Failed to add todo:', error);
@@ -369,14 +354,13 @@ function App() {
     }
   };
 
-  const filteredTodos = todos.filter(todo => {
+  const filteredTodos = state.todos.filter(todo => {
     if (filter === "active") return !todo.completed;
     if (filter === "completed") return todo.completed;
     return true;
   });
 
-  const activeCount = todos.filter(todo => !todo.completed).length;
-  const completedCount = todos.filter(todo => todo.completed).length;
+  const { activeCount, completedCount } = store.getTodoCounts();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-slate-800">
@@ -450,10 +434,10 @@ function App() {
         </form>
 
         {/* Stats */}
-        {todos.length > 0 && (
+        {state.todos.length > 0 && (
           <div className="grid grid-cols-3 gap-2 mb-6">
             <div className="bg-gray-800 rounded-lg p-3 text-center shadow-sm">
-              <div className="text-xl font-bold text-blue-400">{todos.length}</div>
+              <div className="text-xl font-bold text-blue-400">{state.todos.length}</div>
               <div className="text-xs text-gray-400">Total</div>
             </div>
             <div className="bg-gray-800 rounded-lg p-3 text-center shadow-sm">
@@ -468,7 +452,7 @@ function App() {
         )}
 
         {/* Filter Tabs */}
-        {todos.length > 0 && (
+        {state.todos.length > 0 && (
           <div className="flex gap-2 mb-6 bg-gray-800 rounded-lg p-1 shadow-sm">
             {(["all", "active", "completed"] as const).map((filterType) => (
               <button

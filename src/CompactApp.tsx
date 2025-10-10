@@ -2,45 +2,49 @@ import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { listen } from '@tauri-apps/api/event';
-import { database, Todo } from './utils/database';
+import { Todo, database } from './utils/database';
+import { store } from './utils/store';
 
 function CompactApp() {
-  const [todos, setTodos] = useState<Todo[]>([]);
-  const [firstTodo, setFirstTodo] = useState<Todo | null>(null);
+  const [state, setState] = useState(() => store.getState());
+  const [firstTodo, setFirstTodo] = useState<Todo | null>(() => store.getFirstIncompleteTodo());
 
-  // Function to load todos from database
-  const loadTodos = async () => {
-    try {
-      // Get today's date in YYYY-MM-DD format
-      const today = new Date().toISOString().split('T')[0];
-      const loadedTodos = await database.getTodosByDate(today);
-      const incompleteTodos = loadedTodos.filter(todo => !todo.completed);
-      setTodos(incompleteTodos);
-      if (incompleteTodos.length > 0) {
-        setFirstTodo(incompleteTodos[0]);
-      } else {
-        setFirstTodo(null);
-      }
-    } catch (error) {
-      console.error('Failed to load todos in CompactApp:', error);
-    }
-  };
-
-  // Initialize database and load todos
+  
+  // Initialize store and subscribe to state changes
   useEffect(() => {
-    const initializeAndLoadTodos = async () => {
+    const initializeStore = async () => {
       try {
-        // First initialize the database
         await database.init();
+        await store.loadTodos();
 
-        // Load initial todos
-        await loadTodos();
+        // Subscribe to store changes after initialization
+        const unsubscribe = store.subscribe(() => {
+          const newState = store.getState();
+          setState(newState);
+          setFirstTodo(store.getFirstIncompleteTodo());
+        });
+
+        return unsubscribe;
       } catch (error) {
         console.error('Failed to initialize or load todos in CompactApp:', error);
+        return () => {}; // Return empty cleanup function
       }
     };
 
-    initializeAndLoadTodos();
+    let unsubscribe: (() => void) | undefined;
+
+    initializeStore().then((cleanup) => {
+      unsubscribe = cleanup;
+    }).catch(error => {
+      console.error('Initialization failed:', error);
+    });
+
+    // Cleanup on unmount
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, []);
 
   // Set up event listeners for real-time updates
@@ -51,20 +55,25 @@ function CompactApp() {
       try {
         // Listen for todo updates
         const unlistenToggle = await listen('todo-updated', (_event) => {
-          loadTodos();
+          store.loadTodos();
         });
 
         // Listen for new todos
         const unlistenAdd = await listen('todo-added', (_event) => {
-          loadTodos();
+          store.loadTodos();
         });
 
         // Listen for todo deletions
         const unlistenDelete = await listen('todo-deleted', (_event) => {
-          loadTodos();
+          store.loadTodos();
         });
 
-        unlistenFunctions = [unlistenToggle, unlistenAdd, unlistenDelete];
+        // Listen for todo reordering
+        const unlistenReorder = await listen('todos-reordered', (_event) => {
+          store.loadTodos();
+        });
+
+        unlistenFunctions = [unlistenToggle, unlistenAdd, unlistenDelete, unlistenReorder];
       } catch (error) {
         console.error('CompactApp: Failed to setup event listeners:', error);
       }
@@ -81,11 +90,7 @@ function CompactApp() {
   const toggleTodo = async (id: number, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent opening main window when clicking checkbox
     try {
-      // Toggle the todo in the database
-      await database.toggleTodo(id);
-
-      // Reload todos to get updated list
-      await loadTodos();
+      await store.toggleTodo(id);
     } catch (error) {
       console.error('Failed to toggle todo in CompactApp:', error);
     }
@@ -176,9 +181,9 @@ function CompactApp() {
 
       {/* 右侧控制区域 */}
       <div className="flex items-center gap-2">
-        {todos.length > 1 && (
+        {state.todos.filter(todo => !todo.completed).length > 1 && (
           <span className="bg-blue-500 text-white text-xs px-2 py-1 rounded-full">
-            +{todos.length - 1}
+            +{state.todos.filter(todo => !todo.completed).length - 1}
           </span>
         )}
 

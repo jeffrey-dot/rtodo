@@ -219,6 +219,9 @@ class DatabaseService {
           [String(i), String(todoIds[i])]
         );
       }
+
+      // Emit event to notify other windows about reordering
+      await emit('todos-reordered', { todoIds });
     } catch (error) {
       console.error('Failed to reorder todos:', error);
       throw error;
