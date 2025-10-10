@@ -129,7 +129,10 @@ function CompactApp() {
   };
 
   return (
-    <div className="h-screen bg-gradient-to-r from-gray-900 to-slate-800 flex items-center justify-between px-4 select-none">
+    <div
+      className="h-screen bg-gradient-to-r from-gray-900 to-slate-800 flex items-center justify-between px-4 select-none"
+      data-tauri-drag-region
+    >
       {/* 中间点击区域 - TODO内容 */}
       <div
         className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
