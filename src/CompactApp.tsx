@@ -1,12 +1,12 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { listen } from '@tauri-apps/api/event';
 import { database, Todo } from './utils/database';
 
 function CompactApp() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [firstTodo, setFirstTodo] = useState<Todo | null>(null);
-  const intervalRef = useRef<number | null>(null);
 
   // Function to load todos from database
   const loadTodos = async () => {
@@ -37,28 +37,60 @@ function CompactApp() {
         // Load initial todos
         await loadTodos();
 
-        // Set up periodic data sync (every 3 seconds)
-        intervalRef.current = setInterval(loadTodos, 3000);
-
-        console.log('CompactApp: Initialized and set up data sync');
+        console.log('CompactApp: Initialized');
       } catch (error) {
         console.error('Failed to initialize or load todos in CompactApp:', error);
       }
     };
 
     initializeAndLoadTodos();
+  }, []);
 
-    // Cleanup interval on unmount
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
+  // Set up event listeners for real-time updates
+  useEffect(() => {
+    let unlistenFunctions: (() => void)[] = [];
+
+    const setupEventListeners = async () => {
+      try {
+        // Listen for todo updates
+        const unlistenToggle = await listen('todo-updated', (event) => {
+          console.log('CompactApp: Received todo-updated event', event.payload);
+          loadTodos();
+        });
+
+        // Listen for new todos
+        const unlistenAdd = await listen('todo-added', (event) => {
+          console.log('CompactApp: Received todo-added event', event.payload);
+          loadTodos();
+        });
+
+        // Listen for todo deletions
+        const unlistenDelete = await listen('todo-deleted', (event) => {
+          console.log('CompactApp: Received todo-deleted event', event.payload);
+          loadTodos();
+        });
+
+        unlistenFunctions = [unlistenToggle, unlistenAdd, unlistenDelete];
+        console.log('CompactApp: Set up event listeners');
+      } catch (error) {
+        console.error('CompactApp: Failed to setup event listeners:', error);
       }
+    };
+
+    setupEventListeners();
+
+    // Cleanup listeners on unmount
+    return () => {
+      unlistenFunctions.forEach(unlisten => unlisten());
     };
   }, []);
 
   const toggleTodo = async (id: number, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent opening main window when clicking checkbox
     try {
+      // Toggle the todo in the database
+      await database.toggleTodo(id);
+
       // Reload todos to get updated list
       await loadTodos();
 
@@ -116,13 +148,6 @@ function CompactApp() {
 
   return (
     <div className="h-screen bg-gradient-to-r from-gray-900 to-slate-800 flex items-center justify-between px-4 select-none">
-      {/* 左侧拖拽区域 */}
-      <div className="flex items-center gap-2 w-20" data-tauri-drag-region>
-        <span className="text-blue-400 text-lg">
-          📋
-        </span>
-      </div>
-
       {/* 中间点击区域 - TODO内容 */}
       <div
         className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window';
+import { listen } from '@tauri-apps/api/event';
 import { database, Todo } from './utils/database';
 import {
   DndContext,
@@ -47,6 +48,28 @@ function App() {
     return `${year}-${month}-${day}`;
   };
 
+  // Function to sync data from database
+  const syncData = async () => {
+    try {
+      if (isViewingHistorical && selectedDate) {
+        // If viewing historical data, reload the current historical date
+        const historicalTodos = await database.getTodosByDate(selectedDate);
+        setTodos(historicalTodos);
+      } else {
+        // Otherwise, reload today's todos
+        const today = new Date().toISOString().split('T')[0];
+        const todayTodos = await database.getTodosByDate(today);
+        setTodos(todayTodos);
+      }
+
+      // Also refresh historical dates
+      const dates = await database.getHistoricalDates();
+      setHistoricalDates(dates);
+    } catch (error) {
+      console.error('Failed to sync data:', error);
+    }
+  };
+
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, {
@@ -81,6 +104,45 @@ function App() {
 
     initDatabase();
   }, []);
+
+  // Set up event listeners for real-time updates
+  useEffect(() => {
+    let unlistenFunctions: (() => void)[] = [];
+
+    const setupEventListeners = async () => {
+      try {
+        // Listen for todo updates
+        const unlistenToggle = await listen('todo-updated', (event) => {
+          console.log('App: Received todo-updated event', event.payload);
+          syncData();
+        });
+
+        // Listen for new todos
+        const unlistenAdd = await listen('todo-added', (event) => {
+          console.log('App: Received todo-added event', event.payload);
+          syncData();
+        });
+
+        // Listen for todo deletions
+        const unlistenDelete = await listen('todo-deleted', (event) => {
+          console.log('App: Received todo-deleted event', event.payload);
+          syncData();
+        });
+
+        unlistenFunctions = [unlistenToggle, unlistenAdd, unlistenDelete];
+        console.log('App: Set up event listeners');
+      } catch (error) {
+        console.error('App: Failed to setup event listeners:', error);
+      }
+    };
+
+    setupEventListeners();
+
+    // Cleanup listeners on unmount
+    return () => {
+      unlistenFunctions.forEach(unlisten => unlisten());
+    };
+  }, [isViewingHistorical, selectedDate]); // Re-setup listeners when viewing mode changes
 
   // Handle main window close event to also close compact window
   useEffect(() => {
@@ -279,7 +341,7 @@ function App() {
         console.log('Creating new compact window:', windowLabel);
 
         // Calculate position for top-right 1/8 of screen
-        const windowWidth = 500;
+        const windowWidth = 400;
         const windowHeight = 50;
 
         // Get current monitor information

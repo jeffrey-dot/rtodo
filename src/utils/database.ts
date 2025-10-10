@@ -1,5 +1,6 @@
 import Database from '@tauri-apps/plugin-sql';
 import { appDataDir } from '@tauri-apps/api/path';
+import { emit } from '@tauri-apps/api/event';
 
 export interface Todo {
   id: number;
@@ -12,7 +13,6 @@ export interface Todo {
 
 class DatabaseService {
   private db: Database | null = null;
-  private readonly DB_FILE = 'com.ljw.rtodo.db';
   private initialized = false;
 
   async init(): Promise<void> {
@@ -20,26 +20,13 @@ class DatabaseService {
       const dataDir = await appDataDir();
       console.log('Data directory:', dataDir);
 
-      // Create rtodo directory path with proper separators
-      // SQLite will automatically create the database file if the directory exists
-      // We need to ensure the path uses forward slashes for cross-platform compatibility
-      const rtodoDirPath = dataDir.replace(/\\/g, '/') + 'rtodo/';
-      const dbPath = `sqlite:${rtodoDirPath}${this.DB_FILE}`;
+      // Use simple database file in app data directory
+      // Tauri will automatically create the app-specific directory
+      const dbPath = `sqlite:${dataDir.replace(/\\/g, '/')}rtodo.db`;
       console.log('Database path:', dbPath);
 
-      // Try to load the database - if directory doesn't exist, it will fail
-      // but we can handle this gracefully
-      try {
-        this.db = await Database.load(dbPath);
-        console.log('Database loaded successfully');
-      } catch (loadError) {
-        console.error('Failed to load database:', loadError);
-        // Try alternative approach - use app data directory directly
-        const fallbackPath = `sqlite:${dataDir.replace(/\\/g, '/')}${this.DB_FILE}`;
-        console.log('Trying fallback path:', fallbackPath);
-        this.db = await Database.load(fallbackPath);
-        console.log('Database loaded with fallback path');
-      }
+      this.db = await Database.load(dbPath);
+      console.log('Database loaded successfully');
 
       // Create todos table if it doesn't exist
       await this.db.execute(`
@@ -110,11 +97,16 @@ class DatabaseService {
         [text, 0, now, nextSort] // Use 0 instead of false for SQLite
       );
 
-      return {
+      const newTodo = {
         ...result[0],
         completed: Boolean(result[0].completed), // Convert 0/1 to boolean
         createdAt: new Date(result[0].created_at)
       };
+
+      // Emit event to notify other windows
+      await emit('todo-added', { todo: newTodo });
+
+      return newTodo;
     } catch (error) {
       console.error('Failed to add todo:', error);
       throw error;
@@ -134,7 +126,7 @@ class DatabaseService {
 
       const result = await this.db.select(
         `UPDATE todos SET ${setClause} WHERE id = ? RETURNING *`,
-        values
+        values as any[]
       );
 
       return {
@@ -153,6 +145,10 @@ class DatabaseService {
 
     try {
       await this.db.execute('DELETE FROM todos WHERE id = ?', [id]);
+
+      // Emit event to notify other windows
+      await emit('todo-deleted', { id });
+
       return true;
     } catch (error) {
       console.error('Failed to delete todo:', error);
@@ -181,11 +177,16 @@ class DatabaseService {
         [id]
       );
 
-      return {
+      const updatedTodo = {
         ...result[0],
         completed: Boolean(result[0].completed), // Convert 0/1 to boolean
         createdAt: new Date(result[0].created_at)
       };
+
+      // Emit event to notify other windows
+      await emit('todo-updated', { todo: updatedTodo, action: 'toggled' });
+
+      return updatedTodo;
     } catch (error) {
       console.error('Failed to toggle todo:', error);
       throw error;
