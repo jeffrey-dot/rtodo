@@ -106,7 +106,7 @@ class Store {
   }
 
   // Get todo counts
-  getTodoCounts() {
+  getTodoCounts(): { total: number; active: number; completed: number } {
     const total = this.state.todos.length;
     const active = this.state.todos.filter(todo => !todo.completed).length;
     const completed = this.state.todos.filter(todo => todo.completed).length;

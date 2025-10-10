@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
-import { Todo, database } from './utils/database';
+import { database } from './utils/database';
 import { store } from './utils/store';
 import {
   DndContext,
@@ -70,43 +70,32 @@ function App() {
     })
   );
 
-  // Initialize store and subscribe to state changes
+  // Initialize database and load todos on mount
   useEffect(() => {
-    const initializeStore = async () => {
+    const initDatabase = async () => {
       try {
         await database.init();
-        await store.loadTodos();
+        // Load today's todos only
+        const today = new Date().toISOString().split('T')[0];
+        const todayTodos = await database.getTodosByDate(today);
+        store.loadTodos();
 
         // Load historical dates
         const dates = await database.getHistoricalDates();
         setHistoricalDates(dates);
-
-        // Subscribe to store changes after initialization
-        const unsubscribe = store.subscribe(() => {
-          setState(store.getState());
-        });
-
-        return unsubscribe;
       } catch (error) {
-        console.error('Failed to initialize store:', error);
-        return () => {}; // Return empty cleanup function
+        console.error('Failed to initialize database:', error);
       }
     };
 
-    let unsubscribe: (() => void) | undefined;
+    initDatabase();
 
-    initializeStore().then((cleanup) => {
-      unsubscribe = cleanup;
-    }).catch(error => {
-      console.error('Initialization failed:', error);
+    // Subscribe to store changes
+    const unsubscribe = store.subscribe(() => {
+      setState(store.getState());
     });
 
-    // Cleanup on unmount
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
-    };
+    return unsubscribe;
   }, []);
 
   // Set up event listeners for real-time updates
@@ -360,7 +349,9 @@ function App() {
     return true;
   });
 
-  const { activeCount, completedCount } = store.getTodoCounts();
+  const todoCounts = store.getTodoCounts();
+const activeCount = todoCounts.active;
+const completedCount = todoCounts.completed;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-slate-800">

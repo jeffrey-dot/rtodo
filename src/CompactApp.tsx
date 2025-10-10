@@ -10,41 +10,27 @@ function CompactApp() {
   const [firstTodo, setFirstTodo] = useState<Todo | null>(() => store.getFirstIncompleteTodo());
 
   
-  // Initialize store and subscribe to state changes
+  // Initialize database and load todos on mount
   useEffect(() => {
-    const initializeStore = async () => {
+    const initDatabase = async () => {
       try {
         await database.init();
         await store.loadTodos();
-
-        // Subscribe to store changes after initialization
-        const unsubscribe = store.subscribe(() => {
-          const newState = store.getState();
-          setState(newState);
-          setFirstTodo(store.getFirstIncompleteTodo());
-        });
-
-        return unsubscribe;
       } catch (error) {
-        console.error('Failed to initialize or load todos in CompactApp:', error);
-        return () => {}; // Return empty cleanup function
+        console.error('Failed to initialize database in CompactApp:', error);
       }
     };
 
-    let unsubscribe: (() => void) | undefined;
+    initDatabase();
 
-    initializeStore().then((cleanup) => {
-      unsubscribe = cleanup;
-    }).catch(error => {
-      console.error('Initialization failed:', error);
+    // Subscribe to store changes
+    const unsubscribe = store.subscribe(() => {
+      const newState = store.getState();
+      setState(newState);
+      setFirstTodo(store.getFirstIncompleteTodo());
     });
 
-    // Cleanup on unmount
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
-    };
+    return unsubscribe;
   }, []);
 
   // Set up event listeners for real-time updates

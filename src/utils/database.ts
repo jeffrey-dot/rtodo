@@ -179,6 +179,9 @@ class DatabaseService {
         createdAt: new Date(result[0].created_at)
       };
 
+      // Re-sort todos to maintain proper order after status change
+      await this.reorderAfterStatusChange();
+
       // Emit event to notify other windows
       await emit('todo-updated', { todo: updatedTodo, action: 'toggled' });
 
@@ -186,6 +189,34 @@ class DatabaseService {
     } catch (error) {
       console.error('Failed to toggle todo:', error);
       throw error;
+    }
+  }
+
+  // Simple method to reorder after status change
+  private async reorderAfterStatusChange(): Promise<void> {
+    try {
+      const todos = await this.db!.select('SELECT id, completed FROM todos ORDER BY completed ASC, sort_order ASC, created_at DESC') as any[];
+      const incompleteTodos = todos.filter(todo => !Boolean(todo.completed));
+      const completedTodos = todos.filter(todo => Boolean(todo.completed));
+
+      // Update sort_order for incomplete todos
+      for (let i = 0; i < incompleteTodos.length; i++) {
+        await this.db!.execute(
+          'UPDATE todos SET sort_order = ? WHERE id = ?',
+          [String(i), String(incompleteTodos[i].id)]
+        );
+      }
+
+      // Update sort_order for completed todos
+      for (let i = 0; i < completedTodos.length; i++) {
+        await this.db!.execute(
+          'UPDATE todos SET sort_order = ? WHERE id = ?',
+          [String(incompleteTodos.length + i), String(completedTodos[i].id)]
+        );
+      }
+    } catch (error) {
+      console.error('Failed to reorder after status change:', error);
+      // Continue anyway, the main toggle operation succeeded
     }
   }
 
@@ -212,11 +243,34 @@ class DatabaseService {
     this.checkInitialized();
 
     try {
-      // Update sort_order for each todo
-      for (let i = 0; i < todoIds.length; i++) {
+      // Get current todo states to separate incomplete and completed
+      const todos = await this.getTodos();
+      const incompleteTodos: number[] = [];
+      const completedTodos: number[] = [];
+
+      // Separate incomplete and completed todos based on the new order
+      todoIds.forEach(id => {
+        const todo = todos.find(t => t.id === id);
+        if (todo && !todo.completed) {
+          incompleteTodos.push(id);
+        } else if (todo && todo.completed) {
+          completedTodos.push(id);
+        }
+      });
+
+      // Update sort_order for incomplete todos (0, 1, 2, ...)
+      for (let i = 0; i < incompleteTodos.length; i++) {
         await this.db!.execute(
           'UPDATE todos SET sort_order = ? WHERE id = ?',
-          [String(i), String(todoIds[i])]
+          [String(i), String(incompleteTodos[i])]
+        );
+      }
+
+      // Update sort_order for completed todos (continuing after incomplete ones)
+      for (let i = 0; i < completedTodos.length; i++) {
+        await this.db!.execute(
+          'UPDATE todos SET sort_order = ? WHERE id = ?',
+          [String(incompleteTodos.length + i), String(completedTodos[i])]
         );
       }
 
@@ -250,7 +304,7 @@ class DatabaseService {
 
     try {
       const result = await this.db!.select(
-        'SELECT * FROM todos WHERE DATE(created_at) = ? ORDER BY sort_order ASC, created_at DESC',
+        'SELECT * FROM todos WHERE DATE(created_at) = ? ORDER BY completed ASC, sort_order ASC, created_at DESC',
         [date]
       ) as any[];
       return result.map((todo: any) => ({
