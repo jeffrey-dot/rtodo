@@ -21,7 +21,7 @@ class DatabaseService {
 
       // Use simple database file in app data directory
       // Tauri will automatically create the app-specific directory
-      const dbPath = `sqlite:${dataDir.replace(/\\/g, '/')}rtodo.db`;
+      const dbPath = `sqlite:${dataDir.replace(/\\/g, '/')}/rtodo.db`;
 
       this.db = await Database.load(dbPath);
 

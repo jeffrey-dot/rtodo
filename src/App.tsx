@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window';
-import { listen } from '@tauri-apps/api/event';
-import { database } from './utils/database';
-import { store } from './utils/store';
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
+import { database } from "./utils/database";
+import { store } from "./utils/store";
 import {
   DndContext,
   closestCenter,
@@ -12,15 +12,15 @@ import {
   useSensor,
   useSensors,
   DragEndEvent,
-} from '@dnd-kit/core';
+} from "@dnd-kit/core";
 import {
   arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import DraggableTodo from './components/DraggableTodo';
-import DatePicker from './components/DatePicker';
+} from "@dnd-kit/sortable";
+import DraggableTodo from "./components/DraggableTodo";
+import DatePicker from "./components/DatePicker";
 
 function App() {
   const [state, setState] = useState(() => store.getState());
@@ -35,8 +35,8 @@ function App() {
   const formatDate = () => {
     const now = new Date();
     const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
   };
 
@@ -44,22 +44,23 @@ function App() {
   const formatDateString = (dateString: string) => {
     const date = new Date(dateString);
     const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
   };
 
   // Function to sync data from store
   const syncData = async () => {
     try {
-      const date = (isViewingHistorical && selectedDate) ? selectedDate : undefined;
+      const date =
+        isViewingHistorical && selectedDate ? selectedDate : undefined;
       await store.loadTodos(date);
 
       // Also refresh historical dates
       const dates = await database.getHistoricalDates();
       setHistoricalDates(dates);
     } catch (error) {
-      console.error('Failed to sync data:', error);
+      console.error("Failed to sync data:", error);
     }
   };
 
@@ -82,7 +83,7 @@ function App() {
         const dates = await database.getHistoricalDates();
         setHistoricalDates(dates);
       } catch (error) {
-        console.error('Failed to initialize database:', error);
+        console.error("Failed to initialize database:", error);
       }
     };
 
@@ -103,28 +104,33 @@ function App() {
     const setupEventListeners = async () => {
       try {
         // Listen for todo updates
-        const unlistenToggle = await listen('todo-updated', (_event) => {
+        const unlistenToggle = await listen("todo-updated", (_event) => {
           syncData();
         });
 
         // Listen for new todos
-        const unlistenAdd = await listen('todo-added', (_event) => {
+        const unlistenAdd = await listen("todo-added", (_event) => {
           syncData();
         });
 
         // Listen for todo deletions
-        const unlistenDelete = await listen('todo-deleted', (_event) => {
+        const unlistenDelete = await listen("todo-deleted", (_event) => {
           syncData();
         });
 
         // Listen for todo reordering
-        const unlistenReorder = await listen('todos-reordered', (_event) => {
+        const unlistenReorder = await listen("todos-reordered", (_event) => {
           syncData();
         });
 
-        unlistenFunctions = [unlistenToggle, unlistenAdd, unlistenDelete, unlistenReorder];
+        unlistenFunctions = [
+          unlistenToggle,
+          unlistenAdd,
+          unlistenDelete,
+          unlistenReorder,
+        ];
       } catch (error) {
-        console.error('App: Failed to setup event listeners:', error);
+        console.error("App: Failed to setup event listeners:", error);
       }
     };
 
@@ -132,7 +138,7 @@ function App() {
 
     // Cleanup listeners on unmount
     return () => {
-      unlistenFunctions.forEach(unlisten => unlisten());
+      unlistenFunctions.forEach((unlisten) => unlisten());
     };
   }, [isViewingHistorical, selectedDate]); // Re-setup listeners when viewing mode changes
 
@@ -141,12 +147,12 @@ function App() {
     const handleWindowClose = async () => {
       try {
         // Close compact window when main window is closed
-        const compactWindow = await WebviewWindow.getByLabel('compact');
+        const compactWindow = await WebviewWindow.getByLabel("compact");
         if (compactWindow) {
           await compactWindow.close();
         }
       } catch (error) {
-        console.error('Failed to close compact window:', error);
+        console.error("Failed to close compact window:", error);
       }
     };
 
@@ -156,19 +162,18 @@ function App() {
         // Listen for window close event
         mainWindow.onCloseRequested(handleWindowClose);
       } catch (error) {
-        console.error('Failed to setup close listener:', error);
+        console.error("Failed to setup close listener:", error);
       }
     };
 
     setupCloseListener();
   }, []);
 
-  
   const toggleTodo = async (id: number) => {
     try {
       await store.toggleTodo(id);
     } catch (error) {
-      console.error('Failed to toggle todo:', error);
+      console.error("Failed to toggle todo:", error);
     }
   };
 
@@ -176,7 +181,7 @@ function App() {
     try {
       await store.deleteTodo(id);
     } catch (error) {
-      console.error('Failed to delete todo:', error);
+      console.error("Failed to delete todo:", error);
     }
   };
 
@@ -184,7 +189,7 @@ function App() {
     try {
       await store.clearCompleted();
     } catch (error) {
-      console.error('Failed to clear completed todos:', error);
+      console.error("Failed to clear completed todos:", error);
     }
   };
 
@@ -200,29 +205,28 @@ function App() {
 
         // Update store with new order
         try {
-          const todoIds = newTodos.map(todo => todo.id);
+          const todoIds = newTodos.map((todo) => todo.id);
           await store.reorderTodos(todoIds);
         } catch (error) {
-          console.error('Failed to reorder todos:', error);
+          console.error("Failed to reorder todos:", error);
         }
       }
     }
   };
 
-  
   const openDatePicker = async () => {
     try {
       const dates = await database.getHistoricalDates();
       setHistoricalDates(dates);
       setShowDatePicker(true);
     } catch (error) {
-      console.error('Failed to get historical dates:', error);
+      console.error("Failed to get historical dates:", error);
     }
   };
 
   const handleDateSelect = async (date: string) => {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toISOString().split("T")[0];
 
       if (date === today) {
         // If selecting today, return to today view
@@ -238,7 +242,7 @@ function App() {
 
       setShowDatePicker(false);
     } catch (error) {
-      console.error('Failed to load todos for selected date:', error);
+      console.error("Failed to load todos for selected date:", error);
     }
   };
 
@@ -248,7 +252,7 @@ function App() {
       setIsViewingHistorical(false);
       await store.loadTodos();
     } catch (error) {
-      console.error('Failed to return to today:', error);
+      console.error("Failed to return to today:", error);
     }
   };
 
@@ -260,14 +264,14 @@ function App() {
         await store.addTodo(inputValue.trim());
         setInputValue("");
       } catch (error) {
-        console.error('Failed to add todo:', error);
+        console.error("Failed to add todo:", error);
       }
     }
   };
 
   const openCompactMode = async () => {
     try {
-      const windowLabel = 'compact';
+      const windowLabel = "compact";
 
       // Check if compact window already exists by trying to get it
       let existingWindow = null;
@@ -286,11 +290,11 @@ function App() {
           await existingWindow.show();
           await existingWindow.setFocus();
         } catch (showError) {
-          console.error('Failed to show existing window:', showError);
+          console.error("Failed to show existing window:", showError);
         }
       } else {
         // Calculate position for top-right 1/8 of screen
-        const windowWidth = 400;
+        const windowWidth = 350;
         const windowHeight = 50;
 
         // Get current monitor information
@@ -303,11 +307,11 @@ function App() {
         // Calculate position: top-right 1/8 of screen, height 1/6 from top
         // 1/8 from right = screenWidth - (screenWidth / 8) - windowWidth
         // 1/6 from top = screenHeight / 6
-        const xOffset = screenWidth - (screenWidth / 10) - windowWidth;
+        const xOffset = screenWidth - screenWidth / 10 - windowWidth;
         const yOffset = screenHeight / 8; // 1/6 from top
 
         const compactWindow = new WebviewWindow(windowLabel, {
-          url: '/compact',
+          url: "/compact",
           width: windowWidth,
           height: windowHeight,
           resizable: false,
@@ -317,7 +321,7 @@ function App() {
           alwaysOnTop: true,
           skipTaskbar: true,
           x: xOffset,
-          y: yOffset
+          y: yOffset,
         });
 
         // Additional window operations to ensure visibility
@@ -327,7 +331,7 @@ function App() {
             await compactWindow.setFocus();
             await compactWindow.unminimize();
           } catch (error) {
-            console.error('Failed to perform window operations:', error);
+            console.error("Failed to perform window operations:", error);
           }
         }, 100);
       }
@@ -335,21 +339,20 @@ function App() {
       // Hide main window
       const mainWebview = getCurrentWindow();
       await mainWebview.hide();
-
     } catch (error) {
-      console.error('Failed to open compact mode:', error);
+      console.error("Failed to open compact mode:", error);
     }
   };
 
-  const filteredTodos = state.todos.filter(todo => {
+  const filteredTodos = state.todos.filter((todo) => {
     if (filter === "active") return !todo.completed;
     if (filter === "completed") return todo.completed;
     return true;
   });
 
   const todoCounts = store.getTodoCounts();
-const activeCount = todoCounts.active;
-const completedCount = todoCounts.completed;
+  const activeCount = todoCounts.active;
+  const completedCount = todoCounts.completed;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-slate-800">
@@ -365,10 +368,11 @@ const completedCount = todoCounts.completed;
                   className="text-3xl font-bold text-white hover:text-gray-300 transition-colors cursor-pointer bg-transparent border-none p-0"
                   title="点击选择历史日期"
                 >
-                  {isViewingHistorical && selectedDate ? formatDateString(selectedDate) : formatDate()}
+                  {isViewingHistorical && selectedDate
+                    ? formatDateString(selectedDate)
+                    : formatDate()}
                 </button>
               </div>
-
 
               <p className="text-gray-400 text-sm text-center">
                 {isViewingHistorical ? (
@@ -400,12 +404,16 @@ const completedCount = todoCounts.completed;
               type="text"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              placeholder={isViewingHistorical ? "历史数据模式 - 无法添加任务" : "What needs to be done?"}
+              placeholder={
+                isViewingHistorical
+                  ? "历史数据模式 - 无法添加任务"
+                  : "What needs to be done?"
+              }
               disabled={isViewingHistorical}
               className={`flex-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm ${
                 isViewingHistorical
-                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed border-gray-600'
-                  : 'bg-gray-800 text-white border-gray-600'
+                  ? "bg-gray-700 text-gray-500 cursor-not-allowed border-gray-600"
+                  : "bg-gray-800 text-white border-gray-600"
               }`}
             />
             <button
@@ -413,8 +421,8 @@ const completedCount = todoCounts.completed;
               disabled={isViewingHistorical}
               className={`px-4 py-2.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-gray-800 transition-colors shadow-sm text-sm font-medium ${
                 isViewingHistorical
-                  ? 'bg-gray-600 text-gray-500 cursor-not-allowed'
-                  : 'bg-blue-500 text-white hover:bg-blue-600'
+                  ? "bg-gray-600 text-gray-500 cursor-not-allowed"
+                  : "bg-blue-500 text-white hover:bg-blue-600"
               }`}
             >
               Add Task
@@ -426,15 +434,21 @@ const completedCount = todoCounts.completed;
         {state.todos.length > 0 && (
           <div className="grid grid-cols-3 gap-2 mb-6">
             <div className="bg-gray-800 rounded-lg p-3 text-center shadow-sm">
-              <div className="text-xl font-bold text-blue-400">{state.todos.length}</div>
+              <div className="text-xl font-bold text-blue-400">
+                {state.todos.length}
+              </div>
               <div className="text-xs text-gray-400">Total</div>
             </div>
             <div className="bg-gray-800 rounded-lg p-3 text-center shadow-sm">
-              <div className="text-xl font-bold text-green-400">{activeCount}</div>
+              <div className="text-xl font-bold text-green-400">
+                {activeCount}
+              </div>
               <div className="text-xs text-gray-400">Active</div>
             </div>
             <div className="bg-gray-800 rounded-lg p-3 text-center shadow-sm">
-              <div className="text-xl font-bold text-purple-400">{completedCount}</div>
+              <div className="text-xl font-bold text-purple-400">
+                {completedCount}
+              </div>
               <div className="text-xs text-gray-400">Completed</div>
             </div>
           </div>
@@ -479,7 +493,7 @@ const completedCount = todoCounts.completed;
               onDragEnd={handleDragEnd}
             >
               <SortableContext
-                items={filteredTodos.map(todo => todo.id)}
+                items={filteredTodos.map((todo) => todo.id)}
                 strategy={verticalListSortingStrategy}
               >
                 {filteredTodos.map((todo) => (
@@ -503,7 +517,8 @@ const completedCount = todoCounts.completed;
               onClick={clearCompleted}
               className="px-3 py-1.5 text-red-400 hover:bg-red-900/30 rounded-lg transition-colors text-sm"
             >
-              Clear {completedCount} completed task{completedCount > 1 ? "s" : ""}
+              Clear {completedCount} completed task
+              {completedCount > 1 ? "s" : ""}
             </button>
           </div>
         )}
@@ -516,7 +531,7 @@ const completedCount = todoCounts.completed;
           selectedDate={selectedDate}
           onDateSelect={handleDateSelect}
           onClose={() => setShowDatePicker(false)}
-          currentDate={new Date().toISOString().split('T')[0]}
+          currentDate={new Date().toISOString().split("T")[0]}
         />
       )}
     </div>
