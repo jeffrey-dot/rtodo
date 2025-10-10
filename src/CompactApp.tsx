@@ -21,7 +21,6 @@ function CompactApp() {
       } else {
         setFirstTodo(null);
       }
-      console.log('CompactApp: Loaded', incompleteTodos.length, 'incomplete todos for today');
     } catch (error) {
       console.error('Failed to load todos in CompactApp:', error);
     }
@@ -36,8 +35,6 @@ function CompactApp() {
 
         // Load initial todos
         await loadTodos();
-
-        console.log('CompactApp: Initialized');
       } catch (error) {
         console.error('Failed to initialize or load todos in CompactApp:', error);
       }
@@ -53,25 +50,21 @@ function CompactApp() {
     const setupEventListeners = async () => {
       try {
         // Listen for todo updates
-        const unlistenToggle = await listen('todo-updated', (event) => {
-          console.log('CompactApp: Received todo-updated event', event.payload);
+        const unlistenToggle = await listen('todo-updated', (_event) => {
           loadTodos();
         });
 
         // Listen for new todos
-        const unlistenAdd = await listen('todo-added', (event) => {
-          console.log('CompactApp: Received todo-added event', event.payload);
+        const unlistenAdd = await listen('todo-added', (_event) => {
           loadTodos();
         });
 
         // Listen for todo deletions
-        const unlistenDelete = await listen('todo-deleted', (event) => {
-          console.log('CompactApp: Received todo-deleted event', event.payload);
+        const unlistenDelete = await listen('todo-deleted', (_event) => {
           loadTodos();
         });
 
         unlistenFunctions = [unlistenToggle, unlistenAdd, unlistenDelete];
-        console.log('CompactApp: Set up event listeners');
       } catch (error) {
         console.error('CompactApp: Failed to setup event listeners:', error);
       }
@@ -93,8 +86,6 @@ function CompactApp() {
 
       // Reload todos to get updated list
       await loadTodos();
-
-      console.log('CompactApp: Toggled todo', id);
     } catch (error) {
       console.error('Failed to toggle todo in CompactApp:', error);
     }

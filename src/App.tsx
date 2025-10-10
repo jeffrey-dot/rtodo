@@ -112,25 +112,21 @@ function App() {
     const setupEventListeners = async () => {
       try {
         // Listen for todo updates
-        const unlistenToggle = await listen('todo-updated', (event) => {
-          console.log('App: Received todo-updated event', event.payload);
+        const unlistenToggle = await listen('todo-updated', (_event) => {
           syncData();
         });
 
         // Listen for new todos
-        const unlistenAdd = await listen('todo-added', (event) => {
-          console.log('App: Received todo-added event', event.payload);
+        const unlistenAdd = await listen('todo-added', (_event) => {
           syncData();
         });
 
         // Listen for todo deletions
-        const unlistenDelete = await listen('todo-deleted', (event) => {
-          console.log('App: Received todo-deleted event', event.payload);
+        const unlistenDelete = await listen('todo-deleted', (_event) => {
           syncData();
         });
 
         unlistenFunctions = [unlistenToggle, unlistenAdd, unlistenDelete];
-        console.log('App: Set up event listeners');
       } catch (error) {
         console.error('App: Failed to setup event listeners:', error);
       }
@@ -298,7 +294,6 @@ function App() {
   };
 
   const openCompactMode = async () => {
-    console.log('Opening compact mode...');
     try {
       const windowLabel = 'compact';
 
@@ -311,35 +306,17 @@ function App() {
           await existingWindow.show();
         }
       } catch (error) {
-        console.log('Compact window does not exist, will create new one');
         existingWindow = null;
       }
 
       if (existingWindow) {
-        console.log('Compact window already exists, showing it');
         try {
-          // Recalculate position for current monitor
-          const monitor = await currentMonitor();
-          const screenWidth = monitor?.size?.width || 1920;
-          const screenHeight = monitor?.size?.height || 1080;
-          const windowWidth = 500;
-
-          // Calculate position: top-right 1/8 of screen, height 1/6 from top
-          // 1/8 from right = screenWidth - (screenWidth / 8) - windowWidth
-          // Minimum 100px from right edge
-          // 1/6 from top = screenHeight / 6
-          const xOffset = Math.min(screenWidth - (screenWidth / 10) - windowWidth, screenWidth - windowWidth - 50);
-          const yOffset = screenHeight / 10; // 1/6 from top
-
           await existingWindow.show();
           await existingWindow.setFocus();
-          console.log('Existing compact window positioned and shown at:', { x: xOffset, y: yOffset });
         } catch (showError) {
           console.error('Failed to show existing window:', showError);
         }
       } else {
-        console.log('Creating new compact window:', windowLabel);
-
         // Calculate position for top-right 1/8 of screen
         const windowWidth = 400;
         const windowHeight = 50;
@@ -357,8 +334,6 @@ function App() {
         const xOffset = screenWidth - (screenWidth / 10) - windowWidth;
         const yOffset = screenHeight / 8; // 1/6 from top
 
-        console.log('Calculated position:', { x: xOffset, y: yOffset, screenWidth, screenHeight });
-
         const compactWindow = new WebviewWindow(windowLabel, {
           url: '/compact',
           width: windowWidth,
@@ -373,20 +348,12 @@ function App() {
           y: yOffset
         });
 
-        // Wait for window to be created and ensure it's positioned correctly
-        compactWindow.once('tauri://created', () => {
-          console.log('Compact window created successfully');
-        });
-
-        console.log('Compact window created:', compactWindow);
-
         // Additional window operations to ensure visibility
         setTimeout(async () => {
           try {
             await compactWindow.show();
             await compactWindow.setFocus();
             await compactWindow.unminimize();
-            console.log('Window operations completed');
           } catch (error) {
             console.error('Failed to perform window operations:', error);
           }

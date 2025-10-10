@@ -18,15 +18,12 @@ class DatabaseService {
   async init(): Promise<void> {
     try {
       const dataDir = await appDataDir();
-      console.log('Data directory:', dataDir);
 
       // Use simple database file in app data directory
       // Tauri will automatically create the app-specific directory
       const dbPath = `sqlite:${dataDir.replace(/\\/g, '/')}rtodo.db`;
-      console.log('Database path:', dbPath);
 
       this.db = await Database.load(dbPath);
-      console.log('Database loaded successfully');
 
       // Create todos table if it doesn't exist
       await this.db.execute(`
@@ -54,7 +51,6 @@ class DatabaseService {
       `);
 
       this.initialized = true;
-      console.log('Database initialized successfully');
     } catch (error) {
       console.error('Failed to initialize database:', error);
       throw error;
@@ -71,8 +67,8 @@ class DatabaseService {
     this.checkInitialized();
 
     try {
-      const result = await this.db.select('SELECT * FROM todos ORDER BY completed ASC, sort_order ASC, created_at DESC');
-      return result.map((todo: any) => ({
+      const result = await this.db!.select('SELECT * FROM todos ORDER BY completed ASC, sort_order ASC, created_at DESC');
+      return (result as any[]).map((todo: any) => ({
         ...todo,
         completed: Boolean(todo.completed), // Convert 0/1 to boolean
         createdAt: new Date(todo.created_at)
@@ -89,13 +85,13 @@ class DatabaseService {
     try {
       const now = new Date().toISOString();
       // Get the highest sort_order for incomplete todos
-      const maxSortResult = await this.db.select('SELECT MAX(sort_order) as max_sort FROM todos WHERE completed = 0');
-      const nextSort = (maxSortResult[0]?.max_sort || 0) + 1;
+      const maxSortResult = await this.db!.select('SELECT MAX(sort_order) as max_sort FROM todos WHERE completed = 0') as any[];
+      const nextSort = ((maxSortResult[0]?.max_sort) || 0) + 1;
 
-      const result = await this.db.select(
+      const result = await this.db!.select(
         'INSERT INTO todos (text, completed, created_at, sort_order) VALUES (?, ?, ?, ?) RETURNING *',
         [text, 0, now, nextSort] // Use 0 instead of false for SQLite
-      );
+      ) as any[];
 
       const newTodo = {
         ...result[0],
@@ -117,17 +113,17 @@ class DatabaseService {
     this.checkInitialized();
 
     try {
-      const setClause = Object.keys(updates).map((key, index) => `${key} = ?`).join(', ');
+      const setClause = Object.keys(updates).map((key) => `${key} = ?`).join(', ');
       // Convert boolean values to 0/1 for SQLite
       const values = Object.values(updates).map(value =>
         typeof value === 'boolean' ? (value ? 1 : 0) : value
       );
-      values.push(id);
+      values.push(String(id));
 
-      const result = await this.db.select(
+      const result = await this.db!.select(
         `UPDATE todos SET ${setClause} WHERE id = ? RETURNING *`,
         values as any[]
-      );
+      ) as any[];
 
       return {
         ...result[0],
@@ -144,7 +140,7 @@ class DatabaseService {
     this.checkInitialized();
 
     try {
-      await this.db.execute('DELETE FROM todos WHERE id = ?', [id]);
+      await this.db!.execute('DELETE FROM todos WHERE id = ?', [String(id)]);
 
       // Emit event to notify other windows
       await emit('todo-deleted', { id });
@@ -160,7 +156,7 @@ class DatabaseService {
     this.checkInitialized();
 
     try {
-      const result = await this.db.execute('DELETE FROM todos WHERE completed = 1');
+      const result = await this.db!.execute('DELETE FROM todos WHERE completed = 1');
       return result.rowsAffected || 0;
     } catch (error) {
       console.error('Failed to clear completed todos:', error);
@@ -172,10 +168,10 @@ class DatabaseService {
     this.checkInitialized();
 
     try {
-      const result = await this.db.select(
+      const result = await this.db!.select(
         'UPDATE todos SET completed = NOT completed WHERE id = ? RETURNING *',
-        [id]
-      );
+        [String(id)]
+      ) as any[];
 
       const updatedTodo = {
         ...result[0],
@@ -197,7 +193,7 @@ class DatabaseService {
     this.checkInitialized();
 
     try {
-      const result = await this.db.select('SELECT * FROM todos ORDER BY sort_order ASC, created_at DESC LIMIT 1');
+      const result = await this.db!.select('SELECT * FROM todos ORDER BY sort_order ASC, created_at DESC LIMIT 1') as any[];
       if (result.length > 0) {
         return {
           ...result[0],
@@ -218,9 +214,9 @@ class DatabaseService {
     try {
       // Update sort_order for each todo
       for (let i = 0; i < todoIds.length; i++) {
-        await this.db.execute(
+        await this.db!.execute(
           'UPDATE todos SET sort_order = ? WHERE id = ?',
-          [i, todoIds[i]]
+          [String(i), String(todoIds[i])]
         );
       }
     } catch (error) {
@@ -233,12 +229,12 @@ class DatabaseService {
     this.checkInitialized();
 
     try {
-      const result = await this.db.select(`
+      const result = await this.db!.select(`
         SELECT DISTINCT DATE(created_at) as date
         FROM todos
         WHERE DATE(created_at) < DATE('now', 'localtime')
         ORDER BY date DESC
-      `);
+      `) as any[];
       return result.map((row: any) => row.date);
     } catch (error) {
       console.error('Failed to get historical dates:', error);
@@ -250,10 +246,10 @@ class DatabaseService {
     this.checkInitialized();
 
     try {
-      const result = await this.db.select(
+      const result = await this.db!.select(
         'SELECT * FROM todos WHERE DATE(created_at) = ? ORDER BY sort_order ASC, created_at DESC',
         [date]
-      );
+      ) as any[];
       return result.map((todo: any) => ({
         ...todo,
         completed: Boolean(todo.completed),

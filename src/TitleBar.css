@@ -1,0 +1,11 @@
+.titleBar {
+  -webkit-app-region: drag;
+}
+
+.titleContent {
+  -webkit-app-region: drag;
+}
+
+.noDrag {
+  -webkit-app-region: no-drag;
+}
