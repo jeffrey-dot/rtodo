@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { database, Todo } from './utils/database';
@@ -6,6 +6,26 @@ import { database, Todo } from './utils/database';
 function CompactApp() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [firstTodo, setFirstTodo] = useState<Todo | null>(null);
+  const intervalRef = useRef<number | null>(null);
+
+  // Function to load todos from database
+  const loadTodos = async () => {
+    try {
+      // Get today's date in YYYY-MM-DD format
+      const today = new Date().toISOString().split('T')[0];
+      const loadedTodos = await database.getTodosByDate(today);
+      const incompleteTodos = loadedTodos.filter(todo => !todo.completed);
+      setTodos(incompleteTodos);
+      if (incompleteTodos.length > 0) {
+        setFirstTodo(incompleteTodos[0]);
+      } else {
+        setFirstTodo(null);
+      }
+      console.log('CompactApp: Loaded', incompleteTodos.length, 'incomplete todos for today');
+    } catch (error) {
+      console.error('Failed to load todos in CompactApp:', error);
+    }
+  };
 
   // Initialize database and load todos
   useEffect(() => {
@@ -14,40 +34,37 @@ function CompactApp() {
         // First initialize the database
         await database.init();
 
-        // Then load todos (only incomplete ones)
-        const loadedTodos = await database.getTodos();
-        const incompleteTodos = loadedTodos.filter(todo => !todo.completed);
-        setTodos(incompleteTodos);
-        if (incompleteTodos.length > 0) {
-          setFirstTodo(incompleteTodos[0]);
-        }
-        console.log('CompactApp: Loaded', incompleteTodos.length, 'incomplete todos');
+        // Load initial todos
+        await loadTodos();
+
+        // Set up periodic data sync (every 3 seconds)
+        intervalRef.current = setInterval(loadTodos, 3000);
+
+        console.log('CompactApp: Initialized and set up data sync');
       } catch (error) {
         console.error('Failed to initialize or load todos in CompactApp:', error);
       }
     };
 
     initializeAndLoadTodos();
+
+    // Cleanup interval on unmount
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
   }, []);
 
-  const closeWindow = async () => {
+  const toggleTodo = async (id: number, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent opening main window when clicking checkbox
     try {
-      // Hide the compact window instead of closing it
-      const compactWindow = getCurrentWindow();
-      await compactWindow.hide();
+      // Reload todos to get updated list
+      await loadTodos();
 
-      // Try to focus the main window
-      const mainWindow = WebviewWindow.getByLabel('main');
-      if (mainWindow) {
-        try {
-          await mainWindow.setFocus();
-          await mainWindow.show();
-        } catch (focusError) {
-          console.error('Failed to focus main window:', focusError);
-        }
-      }
+      console.log('CompactApp: Toggled todo', id);
     } catch (error) {
-      console.error('Failed to hide window:', error);
+      console.error('Failed to toggle todo in CompactApp:', error);
     }
   };
 
@@ -66,6 +83,8 @@ function CompactApp() {
         } catch (focusError) {
           console.error('Failed to focus main window:', focusError);
         }
+      } else {
+        console.error('Main window not found');
       }
     } catch (error) {
       console.error('Failed to hide window:', error);
@@ -87,6 +106,8 @@ function CompactApp() {
         } catch (focusError) {
           console.error('Failed to focus main window:', focusError);
         }
+      } else {
+        console.error('Main window not found');
       }
     } catch (error) {
       console.error('Failed to open main window:', error);
@@ -107,6 +128,18 @@ function CompactApp() {
         className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
         onClick={openMainApp}
       >
+        {firstTodo ? (
+          <input
+            type="checkbox"
+            checked={firstTodo.completed}
+            onChange={(e) => {
+          e.stopPropagation();
+          toggleTodo(firstTodo.id, e as any);
+        }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-4 h-4 text-blue-500 rounded focus:ring-blue-400 focus:ring-2 cursor-pointer flex-shrink-0"
+          />
+        ) : null}
         <div className="flex-1 min-w-0">
           {firstTodo ? (
             <div>
@@ -114,7 +147,7 @@ function CompactApp() {
                 {firstTodo.text}
               </p>
               <p className="text-xs text-gray-400 truncate">
-                {firstTodo.createdAt.toLocaleString()}
+                {firstTodo.createdAt ? firstTodo.createdAt.toLocaleString() : ''}
               </p>
             </div>
           ) : (

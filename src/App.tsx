@@ -29,12 +29,22 @@ function App() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isViewingHistorical, setIsViewingHistorical] = useState(false);
 
-  // Format date as MM月DD日
+  // Format date as YYYY年MM月DD日
   const formatDate = () => {
     const now = new Date();
-    const month = now.getMonth() + 1;
-    const day = now.getDate();
-    return `${month}月${day}日`;
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Format date string (YYYY-MM-DD) as YYYY年MM月DD日
+  const formatDateString = (dateString: string) => {
+    const date = new Date(dateString);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   };
 
   const sensors = useSensors(
@@ -49,14 +59,23 @@ function App() {
     const initDatabase = async () => {
       try {
         await database.init();
-        const loadedTodos = await database.getTodos();
-        setTodos(loadedTodos);
+        // Load today's todos only
+        const today = new Date().toISOString().split('T')[0];
+        const todayTodos = await database.getTodosByDate(today);
+        setTodos(todayTodos);
 
         // Load historical dates
         const dates = await database.getHistoricalDates();
         setHistoricalDates(dates);
       } catch (error) {
         console.error('Failed to initialize database:', error);
+        // Fallback to all todos if there's an error
+        try {
+          const allTodos = await database.getTodos();
+          setTodos(allTodos);
+        } catch (fallbackError) {
+          console.error('Failed to load todos:', fallbackError);
+        }
       }
     };
 
@@ -144,6 +163,7 @@ function App() {
     }
   };
 
+  
   const openDatePicker = async () => {
     try {
       const dates = await database.getHistoricalDates();
@@ -156,13 +176,25 @@ function App() {
 
   const handleDateSelect = async (date: string) => {
     try {
-      setSelectedDate(date);
-      const historicalTodos = await database.getTodosByDate(date);
-      setTodos(historicalTodos);
-      setIsViewingHistorical(true);
+      const today = new Date().toISOString().split('T')[0];
+
+      if (date === today) {
+        // If selecting today, return to today view
+        setSelectedDate(null);
+        setIsViewingHistorical(false);
+        const todayTodos = await database.getTodosByDate(today);
+        setTodos(todayTodos);
+      } else {
+        // If selecting historical date
+        setSelectedDate(date);
+        const historicalTodos = await database.getTodosByDate(date);
+        setTodos(historicalTodos);
+        setIsViewingHistorical(true);
+      }
+
       setShowDatePicker(false);
     } catch (error) {
-      console.error('Failed to load historical todos:', error);
+      console.error('Failed to load todos for selected date:', error);
     }
   };
 
@@ -170,10 +202,19 @@ function App() {
     try {
       setSelectedDate(null);
       setIsViewingHistorical(false);
-      const currentTodos = await database.getTodos();
-      setTodos(currentTodos);
+      // Get today's date in YYYY-MM-DD format
+      const today = new Date().toISOString().split('T')[0];
+      const todayTodos = await database.getTodosByDate(today);
+      setTodos(todayTodos);
     } catch (error) {
       console.error('Failed to return to today:', error);
+      // Fallback to all todos if there's an error
+      try {
+        const allTodos = await database.getTodos();
+        setTodos(allTodos);
+      } catch (fallbackError) {
+        console.error('Failed to load todos:', fallbackError);
+      }
     }
   };
 
@@ -183,9 +224,10 @@ function App() {
     if (inputValue.trim() && !isViewingHistorical) {
       try {
         await database.addTodo(inputValue.trim());
-        // Reload all todos to maintain proper sorting order
-        const updatedTodos = await database.getTodos();
-        setTodos(updatedTodos);
+        // Reload today's todos to maintain proper sorting order
+        const today = new Date().toISOString().split('T')[0];
+        const todayTodos = await database.getTodosByDate(today);
+        setTodos(todayTodos);
         setInputValue("");
       } catch (error) {
         console.error('Failed to add todo:', error);
@@ -201,7 +243,7 @@ function App() {
       // Check if compact window already exists by trying to get it
       let existingWindow = null;
       try {
-        existingWindow = WebviewWindow.getByLabel(windowLabel);
+        existingWindow = await WebviewWindow.getByLabel(windowLabel);
         // Try to interact with window to verify it actually exists
         if (existingWindow) {
           await existingWindow.show();
@@ -227,7 +269,6 @@ function App() {
           const xOffset = Math.min(screenWidth - (screenWidth / 10) - windowWidth, screenWidth - windowWidth - 50);
           const yOffset = screenHeight / 10; // 1/6 from top
 
-          await existingWindow.setPosition(xOffset, yOffset);
           await existingWindow.show();
           await existingWindow.setFocus();
           console.log('Existing compact window positioned and shown at:', { x: xOffset, y: yOffset });
@@ -273,7 +314,6 @@ function App() {
         // Wait for window to be created and ensure it's positioned correctly
         compactWindow.once('tauri://created', () => {
           console.log('Compact window created successfully');
-          compactWindow.setPosition(xOffset, yOffset);
         });
 
         console.log('Compact window created:', compactWindow);
@@ -314,43 +354,40 @@ function App() {
       <div className="container mx-auto px-4 py-6 max-w-md">
         {/* Header */}
         <header className="text-center mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex-1">
-              {isViewingHistorical ? (
-                <div className="flex items-center justify-center gap-2 mb-2">
-                  <button
-                    onClick={returnToToday}
-                    className="px-3 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm"
-                    title="返回今天"
-                  >
-                    ← 返回今天
-                  </button>
-                  <h1 className="text-3xl font-bold text-white">
-                    📅 {selectedDate}
-                  </h1>
-                </div>
-              ) : (
+          <div className="relative mb-4">
+            {/* 标题区域 - 绝对居中 */}
+            <div className="flex flex-col items-center">
+              <div className="flex items-center justify-center mb-2 min-h-[2.5rem]">
                 <button
                   onClick={openDatePicker}
-                  className="text-3xl font-bold text-white mb-2 hover:text-blue-400 transition-colors cursor-pointer"
+                  className="text-3xl font-bold text-white hover:text-gray-300 transition-colors cursor-pointer bg-transparent border-none p-0"
                   title="点击选择历史日期"
                 >
-                  ✨ {formatDate()}
+                  {isViewingHistorical && selectedDate ? formatDateString(selectedDate) : formatDate()}
                 </button>
-              )}
-              <p className="text-gray-400 text-sm">
-                {isViewingHistorical ? "历史数据 - 只读模式" : "Organize your tasks with style"}
+              </div>
+
+
+              <p className="text-gray-400 text-sm text-center">
+                {isViewingHistorical ? (
+                  <button
+                    onClick={returnToToday}
+                    className="text-gray-500 hover:text-gray-400 transition-colors cursor-pointer bg-transparent border-none p-0"
+                    title="返回今天"
+                  >
+                    返回今天
+                  </button>
+                ) : (
+                  <button
+                    onClick={openCompactMode}
+                    className="text-gray-500 hover:text-gray-400 transition-colors cursor-pointer bg-transparent border-none p-0"
+                    title="打开小窗"
+                  >
+                    打开小窗
+                  </button>
+                )}
               </p>
             </div>
-            <button
-              onClick={openCompactMode}
-              className="px-3 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
-              title="Compact Mode"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-              </svg>
-            </button>
           </div>
         </header>
 

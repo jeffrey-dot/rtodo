@@ -132,16 +132,6 @@ export default function DatePicker({ historicalDates, selectedDate, onDateSelect
             );
           })}
         </div>
-
-        <div className="mt-4 text-center">
-          <p className="text-gray-400 text-sm">
-            点击选择任意历史日期查看
-          </p>
-          <p className="text-gray-500 text-xs mt-1">
-            • 蓝点表示该日期有TODO记录
-            • 未来日期不可选择
-          </p>
-        </div>
       </div>
     </div>
   );
