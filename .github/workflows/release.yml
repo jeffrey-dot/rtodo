@@ -75,9 +75,6 @@ jobs:
       with:
         workspaces: './src-tauri -> target'
 
-    - name: Build frontend
-      run: pnpm build
-
     - name: Build Tauri app
       run: pnpm tauri build ${{ matrix.args }}
 

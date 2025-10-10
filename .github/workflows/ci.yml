@@ -58,9 +58,6 @@ jobs:
     - name: Run Rust tests
       run: cargo test --manifest-path src-tauri/Cargo.toml
 
-    - name: Build frontend
-      run: pnpm build
-
     - name: Build Tauri app (debug)
       run: pnpm tauri build --debug
 
