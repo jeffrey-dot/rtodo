@@ -55,13 +55,15 @@ function App() {
   const syncData = async () => {
     try {
       const date =
-        (isViewingHistorical || isViewingFuture) && selectedDate ? selectedDate : undefined;
+        (isViewingHistorical || isViewingFuture) && selectedDate
+          ? selectedDate
+          : undefined;
       await store.loadTodos(date);
 
       // Also refresh historical and future dates
       const [historical, future] = await Promise.all([
         database.getHistoricalDates(),
-        database.getFutureDates()
+        database.getFutureDates(),
       ]);
       setHistoricalDates(historical);
       setFutureDates(future);
@@ -88,7 +90,7 @@ function App() {
         // Load historical and future dates
         const [historical, future] = await Promise.all([
           database.getHistoricalDates(),
-          database.getFutureDates()
+          database.getFutureDates(),
         ]);
         setHistoricalDates(historical);
         setFutureDates(future);
@@ -183,7 +185,10 @@ function App() {
     try {
       await store.toggleTodo(id);
       // Ensure we reload the correct date data after toggle
-      const date = (isViewingHistorical || isViewingFuture) && selectedDate ? selectedDate : undefined;
+      const date =
+        (isViewingHistorical || isViewingFuture) && selectedDate
+          ? selectedDate
+          : undefined;
       await store.loadTodos(date);
     } catch (error) {
       console.error("Failed to toggle todo:", error);
@@ -194,7 +199,10 @@ function App() {
     try {
       await store.deleteTodo(id);
       // Ensure we reload the correct date data after deletion
-      const date = (isViewingHistorical || isViewingFuture) && selectedDate ? selectedDate : undefined;
+      const date =
+        (isViewingHistorical || isViewingFuture) && selectedDate
+          ? selectedDate
+          : undefined;
       await store.loadTodos(date);
     } catch (error) {
       console.error("Failed to delete todo:", error);
@@ -205,7 +213,10 @@ function App() {
     try {
       await store.clearCompleted();
       // Ensure we reload the correct date data after clearing
-      const date = (isViewingHistorical || isViewingFuture) && selectedDate ? selectedDate : undefined;
+      const date =
+        (isViewingHistorical || isViewingFuture) && selectedDate
+          ? selectedDate
+          : undefined;
       await store.loadTodos(date);
     } catch (error) {
       console.error("Failed to clear completed todos:", error);
@@ -237,7 +248,7 @@ function App() {
     try {
       const [historical, future] = await Promise.all([
         database.getHistoricalDates(),
-        database.getFutureDates()
+        database.getFutureDates(),
       ]);
       setHistoricalDates(historical);
       setFutureDates(future);
@@ -294,7 +305,8 @@ function App() {
     if (inputValue.trim() && !isViewingHistorical) {
       try {
         // If viewing future date, add todo to that date, otherwise add to today
-        const targetDate = isViewingFuture && selectedDate ? selectedDate : undefined;
+        const targetDate =
+          isViewingFuture && selectedDate ? selectedDate : undefined;
         await store.addTodo(inputValue.trim(), targetDate);
         setInputValue("");
       } catch (error) {
@@ -356,6 +368,7 @@ function App() {
           skipTaskbar: true,
           x: xOffset,
           y: yOffset,
+          backgroundColor: "#1e293b",
         });
 
         // Additional window operations to ensure visibility
@@ -409,7 +422,7 @@ function App() {
               </div>
 
               <p className="text-gray-400 text-sm text-center">
-                {(isViewingHistorical || isViewingFuture) ? (
+                {isViewingHistorical || isViewingFuture ? (
                   <button
                     onClick={returnToToday}
                     className="text-gray-500 hover:text-gray-400 transition-colors cursor-pointer bg-transparent border-none p-0"
