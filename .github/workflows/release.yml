@@ -1,45 +1,42 @@
-name: Release
+name: Build Release Artifacts
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  create-release:
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-
-    steps:
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
-        draft: false
-        prerelease: false
-
-  build-and-upload:
-    needs: create-release
+  build:
     strategy:
       matrix:
         include:
           - platform: 'linux'
             os: 'ubuntu-latest'
             args: ''
+            artifact_name: 'rtodo-linux.deb'
+            asset_path: 'src-tauri/target/release/bundle/deb/'
+            file_pattern: '*.deb'
           - platform: 'win'
             os: 'windows-latest'
             args: '--target x86_64-pc-windows-msvc'
+            artifact_name: 'rtodo-windows.msi'
+            asset_path: 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/'
+            file_pattern: '*.msi'
           - platform: 'mac'
             os: 'macos-latest'
             args: '--target x86_64-apple-darwin'
+            artifact_name: 'rtodo-macos.dmg'
+            asset_path: 'src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/'
+            file_pattern: '*.dmg'
 
     runs-on: ${{ matrix.os }}
 
@@ -91,12 +88,9 @@ jobs:
     - name: Build Tauri app
       run: pnpm tauri build ${{ matrix.args }}
 
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
       with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: src-tauri/target/${{ matrix.platform == 'win' && 'x86_64-pc-windows-msvc/' || matrix.platform == 'mac' && 'x86_64-apple-darwin/' || '' }}release/bundle/${{ matrix.platform == 'win' && 'msi/' || matrix.platform == 'mac' && 'dmg/' || 'deb/' }}rtodo.${{ matrix.platform == 'win' && 'msi' || matrix.platform == 'mac' && 'dmg' || 'deb' }}
-        asset_name: rtodo-${{ matrix.platform }}.${{ matrix.platform == 'win' && 'msi' || matrix.platform == 'mac' && 'dmg' || 'deb' }}
-        asset_content_type: application/octet-stream
+        name: rtodo-${{ matrix.platform }}
+        path: ${{ matrix.asset_path }}${{ matrix.file_pattern }}
+        retention-days: 30
