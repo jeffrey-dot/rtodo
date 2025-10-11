@@ -28,8 +28,10 @@ function App() {
   const [filter, setFilter] = useState<"all" | "active" | "completed">("all");
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [historicalDates, setHistoricalDates] = useState<string[]>([]);
+  const [futureDates, setFutureDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isViewingHistorical, setIsViewingHistorical] = useState(false);
+  const [isViewingFuture, setIsViewingFuture] = useState(false);
 
   // Format date as YYYY年MM月DD日
   const formatDate = () => {
@@ -53,12 +55,16 @@ function App() {
   const syncData = async () => {
     try {
       const date =
-        isViewingHistorical && selectedDate ? selectedDate : undefined;
+        (isViewingHistorical || isViewingFuture) && selectedDate ? selectedDate : undefined;
       await store.loadTodos(date);
 
-      // Also refresh historical dates
-      const dates = await database.getHistoricalDates();
-      setHistoricalDates(dates);
+      // Also refresh historical and future dates
+      const [historical, future] = await Promise.all([
+        database.getHistoricalDates(),
+        database.getFutureDates()
+      ]);
+      setHistoricalDates(historical);
+      setFutureDates(future);
     } catch (error) {
       console.error("Failed to sync data:", error);
     }
@@ -79,9 +85,13 @@ function App() {
         // Load today's todos only
         store.loadTodos();
 
-        // Load historical dates
-        const dates = await database.getHistoricalDates();
-        setHistoricalDates(dates);
+        // Load historical and future dates
+        const [historical, future] = await Promise.all([
+          database.getHistoricalDates(),
+          database.getFutureDates()
+        ]);
+        setHistoricalDates(historical);
+        setFutureDates(future);
       } catch (error) {
         console.error("Failed to initialize database:", error);
       }
@@ -140,7 +150,7 @@ function App() {
     return () => {
       unlistenFunctions.forEach((unlisten) => unlisten());
     };
-  }, [isViewingHistorical, selectedDate]); // Re-setup listeners when viewing mode changes
+  }, [isViewingHistorical, isViewingFuture, selectedDate]); // Re-setup listeners when viewing mode changes
 
   // Handle main window close event to also close compact window
   useEffect(() => {
@@ -216,11 +226,15 @@ function App() {
 
   const openDatePicker = async () => {
     try {
-      const dates = await database.getHistoricalDates();
-      setHistoricalDates(dates);
+      const [historical, future] = await Promise.all([
+        database.getHistoricalDates(),
+        database.getFutureDates()
+      ]);
+      setHistoricalDates(historical);
+      setFutureDates(future);
       setShowDatePicker(true);
     } catch (error) {
-      console.error("Failed to get historical dates:", error);
+      console.error("Failed to get dates:", error);
     }
   };
 
@@ -232,12 +246,20 @@ function App() {
         // If selecting today, return to today view
         setSelectedDate(null);
         setIsViewingHistorical(false);
+        setIsViewingFuture(false);
         await store.loadTodos();
-      } else {
+      } else if (date < today) {
         // If selecting historical date
         setSelectedDate(date);
         await store.loadTodos(date);
         setIsViewingHistorical(true);
+        setIsViewingFuture(false);
+      } else {
+        // If selecting future date
+        setSelectedDate(date);
+        await store.loadTodos(date);
+        setIsViewingHistorical(false);
+        setIsViewingFuture(true);
       }
 
       setShowDatePicker(false);
@@ -250,6 +272,7 @@ function App() {
     try {
       setSelectedDate(null);
       setIsViewingHistorical(false);
+      setIsViewingFuture(false);
       await store.loadTodos();
     } catch (error) {
       console.error("Failed to return to today:", error);
@@ -261,7 +284,9 @@ function App() {
     e.preventDefault();
     if (inputValue.trim() && !isViewingHistorical) {
       try {
-        await store.addTodo(inputValue.trim());
+        // If viewing future date, add todo to that date, otherwise add to today
+        const targetDate = isViewingFuture && selectedDate ? selectedDate : undefined;
+        await store.addTodo(inputValue.trim(), targetDate);
         setInputValue("");
       } catch (error) {
         console.error("Failed to add todo:", error);
@@ -366,16 +391,16 @@ function App() {
                 <button
                   onClick={openDatePicker}
                   className="text-3xl font-bold text-white hover:text-gray-300 transition-colors cursor-pointer bg-transparent border-none p-0"
-                  title="点击选择历史日期"
+                  title="点击选择日期"
                 >
-                  {isViewingHistorical && selectedDate
+                  {(isViewingHistorical || isViewingFuture) && selectedDate
                     ? formatDateString(selectedDate)
                     : formatDate()}
                 </button>
               </div>
 
               <p className="text-gray-400 text-sm text-center">
-                {isViewingHistorical ? (
+                {(isViewingHistorical || isViewingFuture) ? (
                   <button
                     onClick={returnToToday}
                     className="text-gray-500 hover:text-gray-400 transition-colors cursor-pointer bg-transparent border-none p-0"
@@ -407,6 +432,8 @@ function App() {
               placeholder={
                 isViewingHistorical
                   ? "历史数据模式 - 无法添加任务"
+                  : isViewingFuture
+                  ? "未来日期 - 可添加任务"
                   : "What needs to be done?"
               }
               disabled={isViewingHistorical}
@@ -422,6 +449,8 @@ function App() {
               className={`px-4 py-2.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-gray-800 transition-colors shadow-sm text-sm font-medium ${
                 isViewingHistorical
                   ? "bg-gray-600 text-gray-500 cursor-not-allowed"
+                  : isViewingFuture
+                  ? "bg-green-500 text-white hover:bg-green-600"
                   : "bg-blue-500 text-white hover:bg-blue-600"
               }`}
             >
@@ -503,6 +532,7 @@ function App() {
                     onToggle={toggleTodo}
                     onDelete={deleteTodo}
                     readonly={isViewingHistorical}
+                    disableCompletion={isViewingFuture}
                   />
                 ))}
               </SortableContext>
@@ -528,6 +558,7 @@ function App() {
       {showDatePicker && (
         <DatePicker
           historicalDates={historicalDates}
+          futureDates={futureDates}
           selectedDate={selectedDate}
           onDateSelect={handleDateSelect}
           onClose={() => setShowDatePicker(false)}

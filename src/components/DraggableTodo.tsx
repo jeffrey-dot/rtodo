@@ -9,9 +9,10 @@ interface DraggableTodoProps {
   onToggle: (id: number) => void;
   onDelete: (id: number) => void;
   readonly?: boolean;
+  disableCompletion?: boolean;
 }
 
-export default function DraggableTodo({ todo, onToggle, onDelete, readonly = false }: DraggableTodoProps) {
+export default function DraggableTodo({ todo, onToggle, onDelete, readonly = false, disableCompletion = false }: DraggableTodoProps) {
   const {
     attributes,
     listeners,
@@ -54,13 +55,20 @@ export default function DraggableTodo({ todo, onToggle, onDelete, readonly = fal
         <input
           type="checkbox"
           checked={todo.completed}
-          onChange={() => !readonly && onToggle(todo.id)}
-          disabled={readonly}
+          onChange={() => !readonly && !disableCompletion && onToggle(todo.id)}
+          disabled={readonly || disableCompletion}
           className={`w-4 h-4 rounded focus:ring-2 ${
-            readonly
+            readonly || disableCompletion
               ? 'cursor-not-allowed bg-gray-600 border-gray-500'
               : 'text-blue-500 cursor-pointer focus:ring-blue-400'
           }`}
+          title={
+            readonly
+              ? "历史数据 - 无法标记完成"
+              : disableCompletion
+              ? "未来日期 - 无法标记完成"
+              : undefined
+          }
         />
 
         {/* Todo Text */}

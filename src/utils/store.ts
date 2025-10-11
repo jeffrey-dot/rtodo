@@ -13,6 +13,7 @@ class Store {
     loading: false,
     error: null
   };
+  private currentDate: string | undefined;
 
   // Get current state
   getState(): TodoStore {
@@ -33,6 +34,7 @@ class Store {
 
   // Load todos from database
   async loadTodos(date?: string): Promise<void> {
+    this.currentDate = date;
     this.setState({ loading: true, error: null });
     try {
       let todos: Todo[];
@@ -50,10 +52,10 @@ class Store {
   }
 
   // Add new todo
-  async addTodo(text: string): Promise<void> {
+  async addTodo(text: string, date?: string): Promise<void> {
     try {
-      await database.addTodo(text);
-      await this.loadTodos(); // Reload all todos to maintain proper order
+      await database.addTodo(text, date);
+      await this.loadTodos(date); // Reload todos for the specific date to maintain proper order
     } catch (error) {
       this.setState({ error: String(error) });
     }
@@ -63,7 +65,7 @@ class Store {
   async toggleTodo(id: number): Promise<void> {
     try {
       await database.toggleTodo(id);
-      await this.loadTodos(); // Reload to get updated order
+      await this.loadTodos(this.currentDate); // Reload to get updated order
     } catch (error) {
       this.setState({ error: String(error) });
     }
@@ -73,7 +75,7 @@ class Store {
   async deleteTodo(id: number): Promise<void> {
     try {
       await database.deleteTodo(id);
-      await this.loadTodos(); // Reload to get updated order
+      await this.loadTodos(this.currentDate); // Reload to get updated order
     } catch (error) {
       this.setState({ error: String(error) });
     }
@@ -83,7 +85,7 @@ class Store {
   async reorderTodos(todoIds: number[]): Promise<void> {
     try {
       await database.reorderTodos(todoIds);
-      await this.loadTodos(); // Reload to get updated order
+      await this.loadTodos(this.currentDate); // Reload to get updated order
     } catch (error) {
       this.setState({ error: String(error) });
     }
@@ -93,7 +95,7 @@ class Store {
   async clearCompleted(): Promise<void> {
     try {
       await database.clearCompleted();
-      await this.loadTodos(); // Reload to get updated order
+      await this.loadTodos(this.currentDate); // Reload to get updated order
     } catch (error) {
       this.setState({ error: String(error) });
     }

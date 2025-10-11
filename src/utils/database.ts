@@ -79,13 +79,15 @@ class DatabaseService {
     }
   }
 
-  async addTodo(text: string): Promise<Todo> {
+  async addTodo(text: string, date?: string): Promise<Todo> {
     this.checkInitialized();
 
     try {
-      const now = new Date().toISOString();
-      // Get the highest sort_order for incomplete todos
-      const maxSortResult = await this.db!.select('SELECT MAX(sort_order) as max_sort FROM todos WHERE completed = 0') as any[];
+      const now = date ? new Date(date).toISOString() : new Date().toISOString();
+      // Get the highest sort_order for incomplete todos for the specific date
+      const maxSortResult = await this.db!.select(
+        `SELECT MAX(sort_order) as max_sort FROM todos WHERE completed = 0 AND DATE(created_at) = DATE(?)`
+      , [now]) as any[];
       const nextSort = ((maxSortResult[0]?.max_sort) || 0) + 1;
 
       const result = await this.db!.select(
@@ -289,7 +291,7 @@ class DatabaseService {
       const result = await this.db!.select(`
         SELECT DISTINCT DATE(created_at) as date
         FROM todos
-        WHERE DATE(created_at) < DATE('now', 'localtime')
+        WHERE DATE(created_at) <= DATE('now', 'localtime')
         ORDER BY date DESC
       `) as any[];
       return result.map((row: any) => row.date);
@@ -314,6 +316,23 @@ class DatabaseService {
       }));
     } catch (error) {
       console.error('Failed to get todos by date:', error);
+      throw error;
+    }
+  }
+
+  async getFutureDates(): Promise<string[]> {
+    this.checkInitialized();
+
+    try {
+      const result = await this.db!.select(`
+        SELECT DISTINCT DATE(created_at) as date
+        FROM todos
+        WHERE DATE(created_at) > DATE('now', 'localtime')
+        ORDER BY date ASC
+      `) as any[];
+      return result.map((row: any) => row.date);
+    } catch (error) {
+      console.error('Failed to get future dates:', error);
       throw error;
     }
   }

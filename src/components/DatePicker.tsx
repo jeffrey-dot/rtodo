@@ -2,13 +2,14 @@ import React from 'react';
 
 interface DatePickerProps {
   historicalDates: string[];
+  futureDates: string[];
   selectedDate: string | null;
   onDateSelect: (date: string) => void;
   onClose: () => void;
   currentDate: string;
 }
 
-export default function DatePicker({ historicalDates, selectedDate, onDateSelect, onClose, currentDate }: DatePickerProps) {
+export default function DatePicker({ historicalDates, futureDates, selectedDate, onDateSelect, onClose, currentDate }: DatePickerProps) {
   const today = new Date();
   const [currentMonth, setCurrentMonth] = React.useState(today);
 
@@ -45,6 +46,17 @@ export default function DatePicker({ historicalDates, selectedDate, onDateSelect
   const isToday = (date: Date) => {
     const dateStr = formatDate(date);
     return dateStr === currentDate;
+  };
+
+  const isFutureDate = (date: Date) => {
+    const dateStr = formatDate(date);
+    const todayStr = formatDate(new Date());
+    return dateStr > todayStr;
+  };
+
+  const hasFutureTodos = (date: Date) => {
+    const dateStr = formatDate(date);
+    return futureDates.includes(dateStr);
   };
 
   const changeMonth = (increment: number) => {
@@ -106,12 +118,12 @@ export default function DatePicker({ historicalDates, selectedDate, onDateSelect
             const isCurrentDay = isToday(day);
             const isSelected = selectedDate === dateStr;
             const isPast = day < today && !isCurrentDay;
+            const isFuture = isFutureDate(day);
 
             return (
               <button
                 key={dateStr}
                 onClick={() => onDateSelect(dateStr)}
-                disabled={day > today}
                 className={`h-10 rounded-lg text-sm font-medium transition-all flex flex-col items-center justify-center ${
                   isCurrentDay
                     ? 'bg-blue-500 text-white'
@@ -119,14 +131,17 @@ export default function DatePicker({ historicalDates, selectedDate, onDateSelect
                     ? 'bg-blue-600 text-white'
                     : isPast
                     ? 'bg-gray-700 text-white hover:bg-gray-600'
-                    : day > today
-                    ? 'text-gray-500 cursor-not-allowed'
+                    : isFuture
+                    ? 'bg-green-700 text-white hover:bg-green-600'
                     : 'bg-gray-600 text-white hover:bg-gray-500'
                 }`}
               >
                 {day.getDate()}
                 {isHistorical && (
                   <div className="w-1 h-1 bg-blue-400 rounded-full mx-auto mt-1"></div>
+                )}
+                {hasFutureTodos(day) && (
+                  <div className="w-1 h-1 bg-green-400 rounded-full mx-auto mt-1"></div>
                 )}
               </button>
             );
