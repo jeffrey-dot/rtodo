@@ -182,6 +182,9 @@ function App() {
   const toggleTodo = async (id: number) => {
     try {
       await store.toggleTodo(id);
+      // Ensure we reload the correct date data after toggle
+      const date = (isViewingHistorical || isViewingFuture) && selectedDate ? selectedDate : undefined;
+      await store.loadTodos(date);
     } catch (error) {
       console.error("Failed to toggle todo:", error);
     }
@@ -190,6 +193,9 @@ function App() {
   const deleteTodo = async (id: number) => {
     try {
       await store.deleteTodo(id);
+      // Ensure we reload the correct date data after deletion
+      const date = (isViewingHistorical || isViewingFuture) && selectedDate ? selectedDate : undefined;
+      await store.loadTodos(date);
     } catch (error) {
       console.error("Failed to delete todo:", error);
     }
@@ -198,6 +204,9 @@ function App() {
   const clearCompleted = async () => {
     try {
       await store.clearCompleted();
+      // Ensure we reload the correct date data after clearing
+      const date = (isViewingHistorical || isViewingFuture) && selectedDate ? selectedDate : undefined;
+      await store.loadTodos(date);
     } catch (error) {
       console.error("Failed to clear completed todos:", error);
     }

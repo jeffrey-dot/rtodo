@@ -65,7 +65,10 @@ class Store {
   async toggleTodo(id: number): Promise<void> {
     try {
       await database.toggleTodo(id);
-      await this.loadTodos(this.currentDate); // Reload to get updated order
+      // If currentDate is undefined, don't reload (let the app handle it)
+      if (this.currentDate !== undefined) {
+        await this.loadTodos(this.currentDate);
+      }
     } catch (error) {
       this.setState({ error: String(error) });
     }
@@ -75,7 +78,11 @@ class Store {
   async deleteTodo(id: number): Promise<void> {
     try {
       await database.deleteTodo(id);
-      await this.loadTodos(this.currentDate); // Reload to get updated order
+      // If currentDate is undefined, don't reload (let the app handle it)
+      // This prevents accidentally loading today's data when viewing historical/future dates
+      if (this.currentDate !== undefined) {
+        await this.loadTodos(this.currentDate);
+      }
     } catch (error) {
       this.setState({ error: String(error) });
     }
@@ -95,7 +102,10 @@ class Store {
   async clearCompleted(): Promise<void> {
     try {
       await database.clearCompleted();
-      await this.loadTodos(this.currentDate); // Reload to get updated order
+      // If currentDate is undefined, don't reload (let the app handle it)
+      if (this.currentDate !== undefined) {
+        await this.loadTodos(this.currentDate);
+      }
     } catch (error) {
       this.setState({ error: String(error) });
     }
