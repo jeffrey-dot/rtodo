@@ -21,6 +21,7 @@ import {
 } from "@dnd-kit/sortable";
 import DraggableTodo from "./components/DraggableTodo";
 import DatePicker from "./components/DatePicker";
+import SplashScreen from "./components/SplashScreen";
 
 function App() {
   const [state, setState] = useState(() => store.getState());
@@ -32,6 +33,7 @@ function App() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isViewingHistorical, setIsViewingHistorical] = useState(false);
   const [isViewingFuture, setIsViewingFuture] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Format date as YYYY年MM月DD日
   const formatDate = () => {
@@ -85,7 +87,7 @@ function App() {
       try {
         await database.init();
         // Load today's todos only
-        store.loadTodos();
+        await store.loadTodos();
 
         // Load historical and future dates
         const [historical, future] = await Promise.all([
@@ -96,6 +98,8 @@ function App() {
         setFutureDates(future);
       } catch (error) {
         console.error("Failed to initialize database:", error);
+      } finally {
+        setIsLoading(false);
       }
     };
 
@@ -141,6 +145,8 @@ function App() {
           unlistenDelete,
           unlistenReorder,
         ];
+      } catch (error) {
+        console.error("App: Failed to setup event listeners:", error);
       } catch (error) {
         console.error("App: Failed to setup event listeners:", error);
       }
@@ -400,6 +406,10 @@ function App() {
   const todoCounts = store.getTodoCounts();
   const activeCount = todoCounts.active;
   const completedCount = todoCounts.completed;
+
+  if (isLoading) {
+    return <SplashScreen />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-slate-800">

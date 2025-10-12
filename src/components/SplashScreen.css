@@ -1,0 +1,26 @@
+.splash-screen {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100vh;
+  background-color: #0f172a; /* slate-900 */
+}
+
+.splash-loader {
+  width: 80px;
+  height: 40px;
+  --c:no-repeat linear-gradient(#3b82f6 0 0);
+  background: var(--c) 0%   50%,
+              var(--c) 50%  50%,
+              var(--c) 100% 50%;
+  background-size: 20px 100%;
+  animation: l16 1s infinite linear;
+}
+@keyframes l16 {
+  0%   {background-size: 20px 100%,20px 100%,20px 100%}
+  33%  {background-size: 20px 20% ,20px 100%,20px 100%}
+  50%  {background-size: 20px 100%,20px 20% ,20px 100%}
+  66%  {background-size: 20px 100%,20px 100%,20px 20% }
+  100% {background-size: 20px 100%,20px 100%,20px 100%}
+}
