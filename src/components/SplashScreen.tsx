@@ -4,7 +4,12 @@ import './SplashScreen.css';
 const SplashScreen = () => {
   return (
     <div className="splash-screen">
-      <div className="splash-loader"></div>
+      <div className="todo-loader">
+        <span>T</span>
+        <span>O</span>
+        <span>D</span>
+        <span>O</span>
+      </div>
     </div>
   );
 };
