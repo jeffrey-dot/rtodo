@@ -147,8 +147,6 @@ function App() {
         ];
       } catch (error) {
         console.error("App: Failed to setup event listeners:", error);
-      } catch (error) {
-        console.error("App: Failed to setup event listeners:", error);
       }
     };
 
