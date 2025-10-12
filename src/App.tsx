@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
+import { type } from "@tauri-apps/api/os";
 import { database } from "./utils/database";
 import { store } from "./utils/store";
 import {
@@ -322,45 +323,26 @@ function App() {
   const openCompactMode = async () => {
     try {
       const windowLabel = "compact";
+      let compactWindow = WebviewWindow.getByLabel(windowLabel);
 
-      // Check if compact window already exists by trying to get it
-      let existingWindow = null;
-      try {
-        existingWindow = await WebviewWindow.getByLabel(windowLabel);
-        // Try to interact with window to verify it actually exists
-        if (existingWindow) {
-          await existingWindow.show();
-        }
-      } catch (error) {
-        existingWindow = null;
-      }
-
-      if (existingWindow) {
-        try {
-          await existingWindow.show();
-          await existingWindow.setFocus();
-        } catch (showError) {
-          console.error("Failed to show existing window:", showError);
-        }
+      if (compactWindow) {
+        await compactWindow.show();
+        await compactWindow.setFocus();
       } else {
-        // Calculate position for top-right 1/8 of screen
+        const platform = await type();
+        const isMac = platform === "darwin";
+
         const windowWidth = 350;
         const windowHeight = 50;
 
-        // Get current monitor information
         const monitor = await currentMonitor();
-
-        // Fallback to default screen size if monitor is null
         const screenWidth = monitor?.size?.width || 1920;
         const screenHeight = monitor?.size?.height || 1080;
 
-        // Calculate position: top-right 1/8 of screen, height 1/6 from top
-        // 1/8 from right = screenWidth - (screenWidth / 8) - windowWidth
-        // 1/6 from top = screenHeight / 6
         const xOffset = screenWidth - screenWidth / 10 - windowWidth;
-        const yOffset = screenHeight / 8; // 1/6 from top
+        const yOffset = screenHeight / 8;
 
-        const compactWindow = new WebviewWindow(windowLabel, {
+        compactWindow = new WebviewWindow(windowLabel, {
           url: "/compact",
           width: windowWidth,
           height: windowHeight,
@@ -369,13 +351,12 @@ function App() {
           center: false,
           visible: true,
           alwaysOnTop: true,
-          skipTaskbar: true,
+          skipTaskbar: !isMac, // Disable skipTaskbar on macOS
           x: xOffset,
           y: yOffset,
           backgroundColor: "#1e293b",
         });
 
-        // Additional window operations to ensure visibility
         setTimeout(async () => {
           try {
             await compactWindow.show();
@@ -387,7 +368,6 @@ function App() {
         }, 100);
       }
 
-      // Hide main window
       const mainWebview = getCurrentWindow();
       await mainWebview.hide();
     } catch (error) {
