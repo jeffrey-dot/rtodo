@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import { type } from "@tauri-apps/api/os";
+import { type } from "@tauri-apps/plugin-os";
 import { database } from "./utils/database";
 import { store } from "./utils/store";
 import {
@@ -184,6 +184,21 @@ function App() {
     };
 
     setupCloseListener();
+  }, []);
+
+  // Disable context menu in production
+  useEffect(() => {
+    const handleContextMenu = (e: MouseEvent) => {
+      if (import.meta.env.MODE !== 'development') {
+        e.preventDefault();
+      }
+    };
+
+    document.addEventListener('contextmenu', handleContextMenu);
+
+    return () => {
+      document.removeEventListener('contextmenu', handleContextMenu);
+    };
   }, []);
 
   const toggleTodo = async (id: number) => {
