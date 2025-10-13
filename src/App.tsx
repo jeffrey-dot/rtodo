@@ -338,14 +338,14 @@ function App() {
   const openCompactMode = async () => {
     try {
       const windowLabel = "compact";
-      let compactWindow = WebviewWindow.getByLabel(windowLabel);
+      let compactWindow = await WebviewWindow.getByLabel(windowLabel);
 
       if (compactWindow) {
         await compactWindow.show();
         await compactWindow.setFocus();
       } else {
-        const platform = await type();
-        const isMac = platform === "darwin";
+        const platform = type();
+        const isMac = platform === 'macos';
 
         const windowWidth = 350;
         const windowHeight = 50;
@@ -374,9 +374,9 @@ function App() {
 
         setTimeout(async () => {
           try {
-            await compactWindow.show();
-            await compactWindow.setFocus();
-            await compactWindow.unminimize();
+            await compactWindow!.show();
+            await compactWindow!.setFocus();
+            await compactWindow!.unminimize();
           } catch (error) {
             console.error("Failed to perform window operations:", error);
           }

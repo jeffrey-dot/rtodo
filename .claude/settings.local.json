@@ -25,7 +25,8 @@
       "Bash(npm run tauri:*)",
       "Bash(cmd:*)",
       "Bash(git push:*)",
-      "Bash(ssh:*)"
+      "Bash(ssh:*)",
+      "Bash(git tag:*)"
     ],
     "deny": [],
     "ask": []
