@@ -41,11 +41,8 @@
   },
   "plugins": {
     "sql": {
-      "all": true,
-      "sqlite": true
+      "db": "sqlite:rtodo.db"
     },
-    "os": {
-      "all": true
-    }
+    "single-instance": null
   }
 }

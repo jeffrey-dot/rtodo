@@ -344,8 +344,15 @@ function App() {
         await compactWindow.show();
         await compactWindow.setFocus();
       } else {
-        const platform = type();
-        const isMac = platform === 'macos';
+        let isMac = false;
+        try {
+          const platform = await type();
+          isMac = platform === "macos";
+        } catch (error) {
+          console.warn("Failed to get platform info:", error);
+          // Default to false if platform detection fails
+          isMac = false;
+        }
 
         const windowWidth = 350;
         const windowHeight = 50;
@@ -479,7 +486,7 @@ function App() {
                   : "bg-blue-500 text-white hover:bg-blue-600"
               }`}
             >
-              Add Task
+              +
             </button>
           </div>
         </form>
