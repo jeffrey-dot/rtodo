@@ -214,6 +214,16 @@ class TauriDatabaseService {
     `)) as any[];
     return result.map((row: any) => row.date);
   }
+
+  async close(): Promise<void> {
+    try {
+      if (this.db && typeof this.db.close === 'function') {
+        await this.db.close();
+      }
+    } catch {}
+    this.db = null;
+    this.initialized = false;
+  }
 }
 
 // ---------------- Web (localStorage) implementation ----------------
@@ -456,6 +466,11 @@ class WebDatabaseService {
     this.checkInitialized();
     const today = todayStr();
     return this.listDates().filter((d) => d > today).sort();
+  }
+
+  async close(): Promise<void> {
+    // no-op for web storage
+    return;
   }
 }
 
