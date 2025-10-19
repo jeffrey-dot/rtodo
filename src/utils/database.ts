@@ -467,7 +467,6 @@ class WebDatabaseService {
   async reorderTodos(todoIds: number[]): Promise<void> {
     this.checkInitialized();
     const data = this.read();
-    const all = Object.values(data.todos).flat();
     // Build map of id -> todo and date
     const byId = new Map<number, { t: Todo; date: string }>();
     for (const [date, arr] of Object.entries(data.todos)) {
