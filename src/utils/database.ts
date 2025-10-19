@@ -1,6 +1,4 @@
-import Database from '@tauri-apps/plugin-sql';
-import { appDataDir } from '@tauri-apps/api/path';
-import { emit } from '@tauri-apps/api/event';
+import { emit } from './events';
 
 export interface Todo {
   id: number;
@@ -11,21 +9,27 @@ export interface Todo {
   createdAt?: Date;
 }
 
-class DatabaseService {
-  private db: Database | null = null;
+function isTauri(): boolean {
+  return typeof window !== 'undefined' && !!(window as any).__TAURI__;
+}
+
+// ---------------- Tauri (SQLite) implementation ----------------
+class TauriDatabaseService {
+  private db: any | null = null;
   private initialized = false;
 
   async init(): Promise<void> {
     try {
+      const [{ appDataDir }, { default: Database }] = await Promise.all([
+        import('@tauri-apps/api/path'),
+        import('@tauri-apps/plugin-sql'),
+      ]);
+
       const dataDir = await appDataDir();
-
-      // Use simple database file in app data directory
-      // Tauri will automatically create the app-specific directory
       const dbPath = `sqlite:${dataDir.replace(/\\/g, '/')}/rtodo.db`;
+      // @ts-ignore dynamic module
+      this.db = await (Database as any).load(dbPath);
 
-      this.db = await Database.load(dbPath);
-
-      // Create todos table if it doesn't exist
       await this.db.execute(`
         CREATE TABLE IF NOT EXISTS todos (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,16 +40,12 @@ class DatabaseService {
         )
       `);
 
-      // Add sort_order column if it doesn't exist (for existing databases)
       try {
         await this.db.execute(`
           ALTER TABLE todos ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0
         `);
-      } catch (error) {
-        // Column already exists, ignore error
-      }
+      } catch {}
 
-      // Initialize sort_order for existing records if needed
       await this.db.execute(`
         UPDATE todos SET sort_order = id WHERE sort_order = 0
       `);
@@ -65,277 +65,398 @@ class DatabaseService {
 
   async getTodos(): Promise<Todo[]> {
     this.checkInitialized();
-
-    try {
-      const result = await this.db!.select('SELECT * FROM todos ORDER BY completed ASC, sort_order ASC, created_at DESC');
-      return (result as any[]).map((todo: any) => ({
-        ...todo,
-        completed: Boolean(todo.completed), // Convert 0/1 to boolean
-        createdAt: new Date(todo.created_at)
-      }));
-    } catch (error) {
-      console.error('Failed to get todos:', error);
-      throw error;
-    }
+    const result = await this.db.select('SELECT * FROM todos ORDER BY completed ASC, sort_order ASC, created_at DESC');
+    return (result as any[]).map((todo: any) => ({
+      ...todo,
+      completed: Boolean(todo.completed),
+      createdAt: new Date(todo.created_at),
+    }));
   }
 
   async addTodo(text: string, date?: string): Promise<Todo> {
     this.checkInitialized();
+    const now = date ? new Date(date).toISOString() : new Date().toISOString();
+    const maxSortResult = (await this.db.select(
+      `SELECT MAX(sort_order) as max_sort FROM todos WHERE completed = 0 AND DATE(created_at) = DATE(?)`,
+      [now]
+    )) as any[];
+    const nextSort = (maxSortResult[0]?.max_sort || 0) + 1;
 
-    try {
-      const now = date ? new Date(date).toISOString() : new Date().toISOString();
-      // Get the highest sort_order for incomplete todos for the specific date
-      const maxSortResult = await this.db!.select(
-        `SELECT MAX(sort_order) as max_sort FROM todos WHERE completed = 0 AND DATE(created_at) = DATE(?)`
-      , [now]) as any[];
-      const nextSort = ((maxSortResult[0]?.max_sort) || 0) + 1;
+    const result = (await this.db.select(
+      'INSERT INTO todos (text, completed, created_at, sort_order) VALUES (?, ?, ?, ?) RETURNING *',
+      [text, 0, now, nextSort]
+    )) as any[];
 
-      const result = await this.db!.select(
-        'INSERT INTO todos (text, completed, created_at, sort_order) VALUES (?, ?, ?, ?) RETURNING *',
-        [text, 0, now, nextSort] // Use 0 instead of false for SQLite
-      ) as any[];
+    const newTodo: Todo = {
+      ...result[0],
+      completed: Boolean(result[0].completed),
+      createdAt: new Date(result[0].created_at),
+    };
 
-      const newTodo = {
-        ...result[0],
-        completed: Boolean(result[0].completed), // Convert 0/1 to boolean
-        createdAt: new Date(result[0].created_at)
-      };
-
-      // Emit event to notify other windows
-      await emit('todo-added', { todo: newTodo });
-
-      return newTodo;
-    } catch (error) {
-      console.error('Failed to add todo:', error);
-      throw error;
-    }
+    await emit('todo-added', { todo: newTodo });
+    return newTodo;
   }
 
   async updateTodo(id: number, updates: Partial<Pick<Todo, 'text' | 'completed'>>): Promise<Todo> {
     this.checkInitialized();
+    const setClause = Object.keys(updates)
+      .map((key) => `${key} = ?`)
+      .join(', ');
+    const values = Object.values(updates).map((value) => (typeof value === 'boolean' ? (value ? 1 : 0) : value));
+    values.push(String(id));
 
-    try {
-      const setClause = Object.keys(updates).map((key) => `${key} = ?`).join(', ');
-      // Convert boolean values to 0/1 for SQLite
-      const values = Object.values(updates).map(value =>
-        typeof value === 'boolean' ? (value ? 1 : 0) : value
-      );
-      values.push(String(id));
-
-      const result = await this.db!.select(
-        `UPDATE todos SET ${setClause} WHERE id = ? RETURNING *`,
-        values as any[]
-      ) as any[];
-
-      return {
-        ...result[0],
-        completed: Boolean(result[0].completed), // Convert 0/1 to boolean
-        createdAt: new Date(result[0].created_at)
-      };
-    } catch (error) {
-      console.error('Failed to update todo:', error);
-      throw error;
-    }
+    const result = (await this.db.select(`UPDATE todos SET ${setClause} WHERE id = ? RETURNING *`, values as any[])) as any[];
+    return {
+      ...result[0],
+      completed: Boolean(result[0].completed),
+      createdAt: new Date(result[0].created_at),
+    };
   }
 
   async deleteTodo(id: number): Promise<boolean> {
     this.checkInitialized();
-
-    try {
-      await this.db!.execute('DELETE FROM todos WHERE id = ?', [String(id)]);
-
-      // Emit event to notify other windows
-      await emit('todo-deleted', { id });
-
-      return true;
-    } catch (error) {
-      console.error('Failed to delete todo:', error);
-      throw error;
-    }
+    await this.db.execute('DELETE FROM todos WHERE id = ?', [String(id)]);
+    await emit('todo-deleted', { id });
+    return true;
   }
 
   async clearCompleted(): Promise<number> {
     this.checkInitialized();
-
-    try {
-      const result = await this.db!.execute('DELETE FROM todos WHERE completed = 1');
-      return result.rowsAffected || 0;
-    } catch (error) {
-      console.error('Failed to clear completed todos:', error);
-      throw error;
-    }
+    const result = await this.db.execute('DELETE FROM todos WHERE completed = 1');
+    return result.rowsAffected || 0;
   }
 
   async toggleTodo(id: number): Promise<Todo> {
     this.checkInitialized();
+    const result = (await this.db.select('UPDATE todos SET completed = NOT completed WHERE id = ? RETURNING *', [String(id)])) as any[];
+    const updatedTodo: Todo = {
+      ...result[0],
+      completed: Boolean(result[0].completed),
+      createdAt: new Date(result[0].created_at),
+    };
 
-    try {
-      const result = await this.db!.select(
-        'UPDATE todos SET completed = NOT completed WHERE id = ? RETURNING *',
-        [String(id)]
-      ) as any[];
-
-      const updatedTodo = {
-        ...result[0],
-        completed: Boolean(result[0].completed), // Convert 0/1 to boolean
-        createdAt: new Date(result[0].created_at)
-      };
-
-      // Re-sort todos to maintain proper order after status change
-      await this.reorderAfterStatusChange();
-
-      // Emit event to notify other windows
-      await emit('todo-updated', { todo: updatedTodo, action: 'toggled' });
-
-      return updatedTodo;
-    } catch (error) {
-      console.error('Failed to toggle todo:', error);
-      throw error;
-    }
+    await this.reorderAfterStatusChange();
+    await emit('todo-updated', { todo: updatedTodo, action: 'toggled' });
+    return updatedTodo;
   }
 
-  // Simple method to reorder after status change
   private async reorderAfterStatusChange(): Promise<void> {
-    try {
-      const todos = await this.db!.select('SELECT id, completed FROM todos ORDER BY completed ASC, sort_order ASC, created_at DESC') as any[];
-      const incompleteTodos = todos.filter(todo => !Boolean(todo.completed));
-      const completedTodos = todos.filter(todo => Boolean(todo.completed));
+    const todos = (await this.db.select('SELECT id, completed FROM todos ORDER BY completed ASC, sort_order ASC, created_at DESC')) as any[];
+    const incompleteTodos = todos.filter((t) => !Boolean(t.completed));
+    const completedTodos = todos.filter((t) => Boolean(t.completed));
 
-      // Update sort_order for incomplete todos
-      for (let i = 0; i < incompleteTodos.length; i++) {
-        await this.db!.execute(
-          'UPDATE todos SET sort_order = ? WHERE id = ?',
-          [String(i), String(incompleteTodos[i].id)]
-        );
-      }
-
-      // Update sort_order for completed todos
-      for (let i = 0; i < completedTodos.length; i++) {
-        await this.db!.execute(
-          'UPDATE todos SET sort_order = ? WHERE id = ?',
-          [String(incompleteTodos.length + i), String(completedTodos[i].id)]
-        );
-      }
-    } catch (error) {
-      console.error('Failed to reorder after status change:', error);
-      // Continue anyway, the main toggle operation succeeded
+    for (let i = 0; i < incompleteTodos.length; i++) {
+      await this.db.execute('UPDATE todos SET sort_order = ? WHERE id = ?', [String(i), String(incompleteTodos[i].id)]);
+    }
+    for (let i = 0; i < completedTodos.length; i++) {
+      await this.db.execute('UPDATE todos SET sort_order = ? WHERE id = ?', [String(incompleteTodos.length + i), String(completedTodos[i].id)]);
     }
   }
 
   async getFirstTodo(): Promise<Todo | null> {
     this.checkInitialized();
-
-    try {
-      const result = await this.db!.select('SELECT * FROM todos ORDER BY sort_order ASC, created_at DESC LIMIT 1') as any[];
-      if (result.length > 0) {
-        return {
-          ...result[0],
-          completed: Boolean(result[0].completed), // Convert 0/1 to boolean
-          createdAt: new Date(result[0].created_at)
-        };
-      }
-      return null;
-    } catch (error) {
-      console.error('Failed to get first todo:', error);
-      throw error;
+    const result = (await this.db.select('SELECT * FROM todos ORDER BY sort_order ASC, created_at DESC LIMIT 1')) as any[];
+    if (result.length > 0) {
+      return { ...result[0], completed: Boolean(result[0].completed), createdAt: new Date(result[0].created_at) };
     }
+    return null;
   }
 
   async reorderTodos(todoIds: number[]): Promise<void> {
     this.checkInitialized();
+    const todos = await this.getTodos();
+    const incomplete: number[] = [];
+    const completed: number[] = [];
+    todoIds.forEach((id) => {
+      const t = todos.find((x) => x.id === id);
+      if (!t) return;
+      if (t.completed) completed.push(id);
+      else incomplete.push(id);
+    });
 
-    try {
-      // Get current todo states to separate incomplete and completed
-      const todos = await this.getTodos();
-      const incompleteTodos: number[] = [];
-      const completedTodos: number[] = [];
-
-      // Separate incomplete and completed todos based on the new order
-      todoIds.forEach(id => {
-        const todo = todos.find(t => t.id === id);
-        if (todo && !todo.completed) {
-          incompleteTodos.push(id);
-        } else if (todo && todo.completed) {
-          completedTodos.push(id);
-        }
-      });
-
-      // Update sort_order for incomplete todos (0, 1, 2, ...)
-      for (let i = 0; i < incompleteTodos.length; i++) {
-        await this.db!.execute(
-          'UPDATE todos SET sort_order = ? WHERE id = ?',
-          [String(i), String(incompleteTodos[i])]
-        );
-      }
-
-      // Update sort_order for completed todos (continuing after incomplete ones)
-      for (let i = 0; i < completedTodos.length; i++) {
-        await this.db!.execute(
-          'UPDATE todos SET sort_order = ? WHERE id = ?',
-          [String(incompleteTodos.length + i), String(completedTodos[i])]
-        );
-      }
-
-      // Emit event to notify other windows about reordering
-      await emit('todos-reordered', { todoIds });
-    } catch (error) {
-      console.error('Failed to reorder todos:', error);
-      throw error;
+    for (let i = 0; i < incomplete.length; i++) {
+      await this.db.execute('UPDATE todos SET sort_order = ? WHERE id = ?', [String(i), String(incomplete[i])]);
     }
+    for (let i = 0; i < completed.length; i++) {
+      await this.db.execute('UPDATE todos SET sort_order = ? WHERE id = ?', [String(incomplete.length + i), String(completed[i])]);
+    }
+    await emit('todos-reordered', { todoIds });
   }
 
   async getHistoricalDates(): Promise<string[]> {
     this.checkInitialized();
-
-    try {
-      const result = await this.db!.select(`
-        SELECT DISTINCT DATE(created_at) as date
-        FROM todos
-        WHERE DATE(created_at) <= DATE('now', 'localtime')
-        ORDER BY date DESC
-      `) as any[];
-      return result.map((row: any) => row.date);
-    } catch (error) {
-      console.error('Failed to get historical dates:', error);
-      throw error;
-    }
+    const result = (await this.db.select(`
+      SELECT DISTINCT DATE(created_at) as date
+      FROM todos
+      WHERE DATE(created_at) <= DATE('now', 'localtime')
+      ORDER BY date DESC
+    `)) as any[];
+    return result.map((row: any) => row.date);
   }
 
   async getTodosByDate(date: string): Promise<Todo[]> {
     this.checkInitialized();
-
-    try {
-      const result = await this.db!.select(
-        'SELECT * FROM todos WHERE DATE(created_at) = ? ORDER BY completed ASC, sort_order ASC, created_at DESC',
-        [date]
-      ) as any[];
-      return result.map((todo: any) => ({
-        ...todo,
-        completed: Boolean(todo.completed),
-        createdAt: new Date(todo.created_at)
-      }));
-    } catch (error) {
-      console.error('Failed to get todos by date:', error);
-      throw error;
-    }
+    const result = (await this.db.select('SELECT * FROM todos WHERE DATE(created_at) = ? ORDER BY completed ASC, sort_order ASC, created_at DESC', [date])) as any[];
+    return result.map((todo: any) => ({
+      ...todo,
+      completed: Boolean(todo.completed),
+      createdAt: new Date(todo.created_at),
+    }));
   }
 
   async getFutureDates(): Promise<string[]> {
     this.checkInitialized();
-
-    try {
-      const result = await this.db!.select(`
-        SELECT DISTINCT DATE(created_at) as date
-        FROM todos
-        WHERE DATE(created_at) > DATE('now', 'localtime')
-        ORDER BY date ASC
-      `) as any[];
-      return result.map((row: any) => row.date);
-    } catch (error) {
-      console.error('Failed to get future dates:', error);
-      throw error;
-    }
+    const result = (await this.db.select(`
+      SELECT DISTINCT DATE(created_at) as date
+      FROM todos
+      WHERE DATE(created_at) > DATE('now', 'localtime')
+      ORDER BY date ASC
+    `)) as any[];
+    return result.map((row: any) => row.date);
   }
 }
 
-export const database = new DatabaseService();
+// ---------------- Web (localStorage) implementation ----------------
+
+type StoreShape = {
+  seq: number;
+  todos: Record<string, Todo[]>; // key: YYYY-MM-DD
+};
+
+function getTestId(): string {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('testId') || 'default';
+  } catch {
+    return 'default';
+  }
+}
+
+function todayStr(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
+class WebDatabaseService {
+  private initialized = false;
+  private key = `rtodo-e2e-${getTestId()}`;
+
+  async init(): Promise<void> {
+    if (!localStorage.getItem(this.key)) {
+      const initial: StoreShape = { seq: 0, todos: {} };
+      localStorage.setItem(this.key, JSON.stringify(initial));
+    }
+    this.initialized = true;
+  }
+
+  private checkInitialized(): void {
+    if (!this.initialized) throw new Error('Database not initialized');
+  }
+
+  private read(): StoreShape {
+    const raw = localStorage.getItem(this.key);
+    return raw ? (JSON.parse(raw) as StoreShape) : { seq: 0, todos: {} };
+  }
+
+  private write(data: StoreShape) {
+    localStorage.setItem(this.key, JSON.stringify(data));
+  }
+
+  private ensureDate(data: StoreShape, date: string) {
+    if (!data.todos[date]) data.todos[date] = [];
+  }
+
+  private toPublic(todo: Todo): Todo {
+    return { ...todo, createdAt: new Date(todo.created_at) };
+  }
+
+  async getTodos(): Promise<Todo[]> {
+    this.checkInitialized();
+    const data = this.read();
+    const all = Object.values(data.todos).flat();
+    // Order: incomplete first by sort_order, then completed by sort_order, then created_at desc when tie
+    return all
+      .slice()
+      .sort((a, b) => {
+        if (a.completed !== b.completed) return a.completed ? 1 : -1;
+        if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      })
+      .map((t) => this.toPublic(t));
+  }
+
+  async addTodo(text: string, date?: string): Promise<Todo> {
+    this.checkInitialized();
+    const data = this.read();
+    const dateKey = date ? new Date(date).toISOString().split('T')[0] : todayStr();
+    this.ensureDate(data, dateKey);
+
+    const nextId = ++data.seq;
+    const nextSort = (data.todos[dateKey].filter((t) => !t.completed).reduce((m, t) => Math.max(m, t.sort_order), 0) || 0) + 1;
+    const nowIso = date ? new Date(date).toISOString() : new Date().toISOString();
+    const newTodo: Todo = { id: nextId, text, completed: false, created_at: nowIso, sort_order: nextSort };
+    data.todos[dateKey].push(newTodo);
+    this.write(data);
+    await emit('todo-added', { todo: this.toPublic(newTodo) });
+    return this.toPublic(newTodo);
+  }
+
+  async updateTodo(id: number, updates: Partial<Pick<Todo, 'text' | 'completed'>>): Promise<Todo> {
+    this.checkInitialized();
+    const data = this.read();
+    for (const date of Object.keys(data.todos)) {
+      const arr = data.todos[date];
+      const idx = arr.findIndex((t) => t.id === id);
+      if (idx >= 0) {
+        const updated = { ...arr[idx], ...updates } as Todo;
+        arr[idx] = updated;
+        this.write(data);
+        return this.toPublic(updated);
+      }
+    }
+    throw new Error('Todo not found');
+  }
+
+  async deleteTodo(id: number): Promise<boolean> {
+    this.checkInitialized();
+    const data = this.read();
+    for (const date of Object.keys(data.todos)) {
+      const arr = data.todos[date];
+      const idx = arr.findIndex((t) => t.id === id);
+      if (idx >= 0) {
+        arr.splice(idx, 1);
+        this.write(data);
+        await emit('todo-deleted', { id });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async clearCompleted(): Promise<number> {
+    this.checkInitialized();
+    const data = this.read();
+    let removed = 0;
+    for (const date of Object.keys(data.todos)) {
+      const before = data.todos[date].length;
+      data.todos[date] = data.todos[date].filter((t) => !t.completed);
+      removed += before - data.todos[date].length;
+    }
+    this.write(data);
+    return removed;
+  }
+
+  async toggleTodo(id: number): Promise<Todo> {
+    this.checkInitialized();
+    const data = this.read();
+    for (const date of Object.keys(data.todos)) {
+      const arr = data.todos[date];
+      const idx = arr.findIndex((t) => t.id === id);
+      if (idx >= 0) {
+        arr[idx].completed = !arr[idx].completed;
+        await this.reorderAfterStatusChange(data, date);
+        const updated = this.toPublic(arr[idx]);
+        this.write(data);
+        await emit('todo-updated', { todo: updated, action: 'toggled' });
+        return updated;
+      }
+    }
+    throw new Error('Todo not found');
+  }
+
+  private async reorderAfterStatusChange(data: StoreShape, date: string): Promise<void> {
+    const arr = data.todos[date];
+    const incomplete = arr.filter((t) => !t.completed);
+    const completed = arr.filter((t) => t.completed);
+    incomplete.forEach((t, i) => (t.sort_order = i));
+    completed.forEach((t, i) => (t.sort_order = incomplete.length + i));
+  }
+
+  async getFirstTodo(): Promise<Todo | null> {
+    this.checkInitialized();
+    const data = this.read();
+    const all = Object.values(data.todos).flat();
+    if (all.length === 0) return null;
+    const sorted = all.slice().sort((a, b) => {
+      if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+    return this.toPublic(sorted[0]);
+  }
+
+  async reorderTodos(todoIds: number[]): Promise<void> {
+    this.checkInitialized();
+    const data = this.read();
+    const all = Object.values(data.todos).flat();
+    // Build map of id -> todo and date
+    const byId = new Map<number, { t: Todo; date: string }>();
+    for (const [date, arr] of Object.entries(data.todos)) {
+      for (const t of arr) byId.set(t.id, { t, date });
+    }
+
+    // We only reorder within their current date buckets, preserving completion splits
+    const dateBuckets: Record<string, { incomplete: number[]; completed: number[] }> = {};
+    for (const id of todoIds) {
+      const info = byId.get(id);
+      if (!info) continue;
+      const date = info.date;
+      if (!dateBuckets[date]) dateBuckets[date] = { incomplete: [], completed: [] };
+      if (info.t.completed) dateBuckets[date].completed.push(id);
+      else dateBuckets[date].incomplete.push(id);
+    }
+
+    for (const [date, parts] of Object.entries(dateBuckets)) {
+      const arr = data.todos[date];
+      // Set sort order for incomplete first
+      parts.incomplete.forEach((id, i) => {
+        const todo = arr.find((t) => t.id === id);
+        if (todo) todo.sort_order = i;
+      });
+      parts.completed.forEach((id, i) => {
+        const todo = arr.find((t) => t.id === id);
+        if (todo) todo.sort_order = parts.incomplete.length + i;
+      });
+      // Keep other todos at the end in stable order
+      let max = parts.incomplete.length + parts.completed.length;
+      arr
+        .filter((t) => !parts.incomplete.includes(t.id) && !parts.completed.includes(t.id))
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .forEach((t) => (t.sort_order = max++));
+    }
+
+    this.write(data);
+    await emit('todos-reordered', { todoIds });
+  }
+
+  private listDates(): string[] {
+    const data = this.read();
+    return Object.keys(data.todos).sort();
+  }
+
+  async getHistoricalDates(): Promise<string[]> {
+    this.checkInitialized();
+    const today = todayStr();
+    return this.listDates().filter((d) => d <= today).sort().reverse();
+  }
+
+  async getTodosByDate(date: string): Promise<Todo[]> {
+    this.checkInitialized();
+    const data = this.read();
+    const arr = data.todos[date] || [];
+    return arr
+      .slice()
+      .sort((a, b) => {
+        if (a.completed !== b.completed) return a.completed ? 1 : -1;
+        if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      })
+      .map((t) => this.toPublic(t));
+  }
+
+  async getFutureDates(): Promise<string[]> {
+    this.checkInitialized();
+    const today = todayStr();
+    return this.listDates().filter((d) => d > today).sort();
+  }
+}
+
+export const database = isTauri() ? new TauriDatabaseService() : new WebDatabaseService();

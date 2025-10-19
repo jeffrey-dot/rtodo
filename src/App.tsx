@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "./utils/events";
 import { type } from "@tauri-apps/plugin-os";
 import { database } from "./utils/database";
 import { store } from "./utils/store";
@@ -469,6 +469,7 @@ function App() {
                   : "What needs to be done?"
               }
               disabled={isViewingHistorical}
+              data-testid="new-todo-input"
               className={`flex-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm ${
                 isViewingHistorical
                   ? "bg-gray-700 text-gray-500 cursor-not-allowed border-gray-600"
@@ -478,6 +479,7 @@ function App() {
             <button
               type="submit"
               disabled={isViewingHistorical}
+              data-testid="add-todo-button"
               className={`px-4 py-2.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-gray-800 transition-colors shadow-sm text-sm font-medium ${
                 isViewingHistorical
                   ? "bg-gray-600 text-gray-500 cursor-not-allowed"
@@ -495,19 +497,19 @@ function App() {
         {state.todos.length > 0 && (
           <div className="grid grid-cols-3 gap-2 mb-6">
             <div className="bg-gray-800 rounded-lg p-3 text-center shadow-sm">
-              <div className="text-xl font-bold text-blue-400">
+              <div className="text-xl font-bold text-blue-400" data-testid="total-count">
                 {state.todos.length}
               </div>
               <div className="text-xs text-gray-400">Total</div>
             </div>
             <div className="bg-gray-800 rounded-lg p-3 text-center shadow-sm">
-              <div className="text-xl font-bold text-green-400">
+              <div className="text-xl font-bold text-green-400" data-testid="active-count">
                 {activeCount}
               </div>
               <div className="text-xs text-gray-400">Active</div>
             </div>
             <div className="bg-gray-800 rounded-lg p-3 text-center shadow-sm">
-              <div className="text-xl font-bold text-purple-400">
+              <div className="text-xl font-bold text-purple-400" data-testid="completed-count">
                 {completedCount}
               </div>
               <div className="text-xs text-gray-400">Completed</div>
@@ -535,7 +537,7 @@ function App() {
         )}
 
         {/* Todo List */}
-        <div className="space-y-2 mb-6">
+        <div className="space-y-2 mb-6" data-testid="todo-list">
           {filteredTodos.length === 0 ? (
             <div className="text-center py-8 bg-gray-800 rounded-lg shadow-sm">
               <div className="text-5xl mb-3">📝</div>

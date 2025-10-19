@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "./utils/events";
 import { Todo, database } from "./utils/database";
 import { store } from "./utils/store";
 
@@ -140,6 +140,7 @@ function CompactApp() {
               <p
                 data-tauri-drag-region
                 className="text-white text-sm font-medium truncate"
+                data-testid="compact-first-text"
               >
                 {firstTodo.text}
               </p>
@@ -168,6 +169,7 @@ function CompactApp() {
             <span
               data-tauri-drag-region
               className="bg-blue-500 text-white text-xs px-2 py-1 rounded-full"
+              data-testid="compact-extra-count"
             >
               +{state.todos.filter((todo) => !todo.completed).length - 1}
             </span>
