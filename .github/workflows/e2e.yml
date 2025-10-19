@@ -34,4 +34,4 @@ jobs:
       - name: Run Playwright tests
         env:
           CI: true
-        run: pnpm test:e2e
+        run: xvfb-run --auto-servernum -- pnpm test:e2e
