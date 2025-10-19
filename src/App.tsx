@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "./utils/events";
@@ -76,7 +76,9 @@ function App() {
   };
 
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 },
+    }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
@@ -201,10 +203,9 @@ function App() {
     };
   }, []);
 
-  const toggleTodo = async (id: number) => {
+  const toggleTodo = useCallback(async (id: number) => {
     try {
       await store.toggleTodo(id);
-      // Ensure we reload the correct date data after toggle
       const date =
         (isViewingHistorical || isViewingFuture) && selectedDate
           ? selectedDate
@@ -213,12 +214,11 @@ function App() {
     } catch (error) {
       console.error("Failed to toggle todo:", error);
     }
-  };
+  }, [isViewingHistorical, isViewingFuture, selectedDate]);
 
-  const deleteTodo = async (id: number) => {
+  const deleteTodo = useCallback(async (id: number) => {
     try {
       await store.deleteTodo(id);
-      // Ensure we reload the correct date data after deletion
       const date =
         (isViewingHistorical || isViewingFuture) && selectedDate
           ? selectedDate
@@ -227,12 +227,11 @@ function App() {
     } catch (error) {
       console.error("Failed to delete todo:", error);
     }
-  };
+  }, [isViewingHistorical, isViewingFuture, selectedDate]);
 
-  const clearCompleted = async () => {
+  const clearCompleted = useCallback(async () => {
     try {
       await store.clearCompleted();
-      // Ensure we reload the correct date data after clearing
       const date =
         (isViewingHistorical || isViewingFuture) && selectedDate
           ? selectedDate
@@ -241,9 +240,9 @@ function App() {
     } catch (error) {
       console.error("Failed to clear completed todos:", error);
     }
-  };
+  }, [isViewingHistorical, isViewingFuture, selectedDate]);
 
-  const handleDragEnd = async (event: DragEndEvent) => {
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;
 
     if (active.id !== over?.id) {
@@ -253,7 +252,6 @@ function App() {
       if (oldIndex !== -1 && newIndex !== -1) {
         const newTodos = arrayMove(state.todos, oldIndex, newIndex);
 
-        // Update store with new order
         try {
           const todoIds = newTodos.map((todo) => todo.id);
           await store.reorderTodos(todoIds);
@@ -262,7 +260,7 @@ function App() {
         }
       }
     }
-  };
+  }, [state.todos]);
 
   const openDatePicker = async () => {
     try {
@@ -397,11 +395,13 @@ function App() {
     }
   };
 
-  const filteredTodos = state.todos.filter((todo) => {
-    if (filter === "active") return !todo.completed;
-    if (filter === "completed") return todo.completed;
-    return true;
-  });
+  const filteredTodos = useMemo(() => {
+    return state.todos.filter((todo) => {
+      if (filter === "active") return !todo.completed;
+      if (filter === "completed") return todo.completed;
+      return true;
+    });
+  }, [state.todos, filter]);
 
   const todoCounts = store.getTodoCounts();
   const activeCount = todoCounts.active;

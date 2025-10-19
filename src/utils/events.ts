@@ -46,7 +46,38 @@ export async function listen<T = any>(event: string, handler: (event: { event: s
   return () => ch?.removeEventListener('message', listener);
 }
 
+// Debounce/coalesce frequent events like reorder bursts to reduce chatter
+const debounceDelays: Record<string, number> = {
+  'todos-reordered': 80,
+};
+
+const pending: Map<string, { timeout: any; payload: any }> = new Map();
+
 export async function emit<T = any>(event: string, payload?: T): Promise<void> {
+  const delay = debounceDelays[event] ?? 0;
+  if (delay > 0) {
+    const existing = pending.get(event);
+    if (existing) {
+      // Update latest payload and reset timer
+      existing.payload = payload;
+      clearTimeout(existing.timeout);
+      existing.timeout = setTimeout(() => {
+        pending.delete(event);
+        void doEmit(event, payload);
+      }, delay);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      pending.delete(event);
+      void doEmit(event, payload);
+    }, delay);
+    pending.set(event, { timeout, payload });
+    return;
+  }
+  await doEmit(event, payload);
+}
+
+async function doEmit<T = any>(event: string, payload?: T): Promise<void> {
   if (isTauri()) {
     const mod: any = await import('@tauri-apps/api/event');
     await mod.emit(event, payload);
