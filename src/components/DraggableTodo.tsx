@@ -1,6 +1,5 @@
-import {
-  useSortable,
-} from '@dnd-kit/sortable';
+import React, { memo } from 'react';
+import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Todo } from '../utils/database';
 
@@ -12,7 +11,7 @@ interface DraggableTodoProps {
   disableCompletion?: boolean;
 }
 
-export default function DraggableTodo({ todo, onToggle, onDelete, readonly = false, disableCompletion = false }: DraggableTodoProps) {
+function DraggableTodo({ todo, onToggle, onDelete, readonly = false, disableCompletion = false }: DraggableTodoProps) {
   const {
     attributes,
     listeners,
@@ -26,7 +25,7 @@ export default function DraggableTodo({ todo, onToggle, onDelete, readonly = fal
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
-  };
+  } as React.CSSProperties;
 
   return (
     <div
@@ -45,7 +44,7 @@ export default function DraggableTodo({ todo, onToggle, onDelete, readonly = fal
               ? 'cursor-not-allowed text-gray-600'
               : 'cursor-grab active:cursor-grabbing text-gray-400 hover:text-white'
           }`}
-          title={readonly ? "历史数据 - 无法拖动" : "Drag to reorder"}
+          title={readonly ? '历史数据 - 无法拖动' : 'Drag to reorder'}
           data-testid="todo-drag-handle"
         >
           <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -66,9 +65,9 @@ export default function DraggableTodo({ todo, onToggle, onDelete, readonly = fal
           }`}
           title={
             readonly
-              ? "历史数据 - 无法标记完成"
+              ? '历史数据 - 无法标记完成'
               : disableCompletion
-              ? "未来日期 - 无法标记完成"
+              ? '未来日期 - 无法标记完成'
               : undefined
           }
           data-testid="todo-toggle"
@@ -78,9 +77,7 @@ export default function DraggableTodo({ todo, onToggle, onDelete, readonly = fal
         <div className="flex-1">
           <p
             className={`${
-              todo.completed
-                ? "line-through text-gray-400"
-                : "text-white"
+              todo.completed ? 'line-through text-gray-400' : 'text-white'
             } text-sm`}
           >
             {todo.text}
@@ -99,7 +96,7 @@ export default function DraggableTodo({ todo, onToggle, onDelete, readonly = fal
               ? 'cursor-not-allowed text-gray-600'
               : 'text-red-400 hover:bg-red-900/30'
           }`}
-          title={readonly ? "历史数据 - 无法删除" : "Delete task"}
+          title={readonly ? '历史数据 - 无法删除' : 'Delete task'}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -109,3 +106,18 @@ export default function DraggableTodo({ todo, onToggle, onDelete, readonly = fal
     </div>
   );
 }
+
+function areEqual(prev: DraggableTodoProps, next: DraggableTodoProps) {
+  return (
+    prev.readonly === next.readonly &&
+    prev.disableCompletion === next.disableCompletion &&
+    prev.todo.id === next.todo.id &&
+    prev.todo.text === next.todo.text &&
+    prev.todo.completed === next.todo.completed &&
+    prev.todo.sort_order === next.todo.sort_order &&
+    prev.onToggle === next.onToggle &&
+    prev.onDelete === next.onDelete
+  );
+}
+
+export default memo(DraggableTodo, areEqual);
