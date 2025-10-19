@@ -43,6 +43,13 @@
     "sql": {
       "db": "sqlite:rtodo.db"
     },
-    "single-instance": null
+    "single-instance": null,
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/OWNER/REPO/releases/latest/download/latest.json"
+      ],
+      "dialog": false
+    }
   }
 }

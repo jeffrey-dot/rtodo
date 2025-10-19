@@ -5,6 +5,7 @@ import { listen } from "./utils/events";
 import { type } from "@tauri-apps/plugin-os";
 import { database } from "./utils/database";
 import { store } from "./utils/store";
+import { updateService, type UpdateInfo } from "./utils/update";
 import {
   DndContext,
   closestCenter,
@@ -35,6 +36,17 @@ function App() {
   const [isViewingHistorical, setIsViewingHistorical] = useState(false);
   const [isViewingFuture, setIsViewingFuture] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Updates / About
+  const [appVersion, setAppVersion] = useState<string>("");
+  const [updateToastInfo, setUpdateToastInfo] = useState<UpdateInfo | null>(null);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<{ received: number; total?: number } | null>(null);
+  const [downloaded, setDownloaded] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   // Format date as YYYY年MM月DD日
   const formatDate = () => {
@@ -104,7 +116,45 @@ function App() {
       }
     };
 
+    const initUpdates = async () => {
+      try {
+        if (!(window as any).__TAURI__) return;
+        await updateService.init();
+        updateService.subscribe({
+          onAvailable: (info) => {
+            setUpdateToastInfo(info);
+            setUpdateInfo(info);
+          },
+          onNoUpdate: () => {
+            // Only show toast when checking manually (handled in handler below)
+          },
+          onProgress: (received, total) => {
+            setIsDownloading(true);
+            setDownloadProgress({ received, total });
+          },
+          onDownloaded: () => {
+            setIsDownloading(false);
+            setDownloaded(true);
+          },
+          onError: (e) => {
+            setIsDownloading(false);
+            setUpdateError(String(e));
+            setTimeout(() => setUpdateError(null), 3000);
+          },
+        });
+        try {
+          const { getVersion } = await import("@tauri-apps/api/app");
+          setAppVersion(await getVersion());
+        } catch {}
+        // background check on launch
+        updateService.checkForUpdates();
+      } catch (e) {
+        console.warn("Update service init failed:", e);
+      }
+    };
+
     initDatabase();
+    initUpdates();
 
     // Subscribe to store changes
     const unsubscribe = store.subscribe(() => {
@@ -407,6 +457,46 @@ function App() {
   const activeCount = todoCounts.active;
   const completedCount = todoCounts.completed;
 
+  const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI__;
+
+  const handleManualCheck = async () => {
+    if (!isTauri) return;
+    setIsCheckingUpdate(true);
+    updateService.subscribe({
+      onNoUpdate: () => {
+        setUpdateError("已是最新版本");
+        setTimeout(() => setUpdateError(null), 2500);
+      },
+    });
+    try {
+      await updateService.checkForUpdates();
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
+
+  const startDownload = async () => {
+    setShowUpdateModal(true);
+    setIsDownloading(true);
+    setDownloaded(false);
+    setDownloadProgress(null);
+    try {
+      await updateService.download();
+    } catch (e) {
+      setUpdateError(String(e));
+    }
+  };
+
+  const restartToUpdate = async () => {
+    try {
+      await updateService.installAndRelaunch(async () => {
+        try { await (database as any).close?.(); } catch {}
+      });
+    } catch (e) {
+      setUpdateError(String(e));
+    }
+  };
+
   if (isLoading) {
     return <SplashScreen />;
   }
@@ -414,6 +504,77 @@ function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-slate-800">
       <div className="container mx-auto px-4 py-6 max-w-md">
+        {/* Toast for update available */}
+        {isTauri && updateToastInfo && !showUpdateModal && (
+          <div className="fixed top-4 right-4 bg-gray-800 text-white rounded shadow-lg p-4 z-50 max-w-sm">
+            <div className="flex items-start gap-3">
+              <div className="flex-1">
+                <p className="font-semibold">发现新版本 {updateToastInfo.version || ''}</p>
+                <p className="text-xs text-gray-300 mt-1 max-h-12 overflow-hidden">{updateToastInfo.notes || '有可用更新。'}</p>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    className="px-3 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-700"
+                    onClick={() => { setShowUpdateModal(true); }}
+                  >
+                    详情
+                  </button>
+                  <button
+                    className="px-3 py-1.5 text-xs rounded bg-green-600 hover:bg-green-700"
+                    onClick={startDownload}
+                  >
+                    立即下载
+                  </button>
+                </div>
+              </div>
+              <button className="text-gray-400 hover:text-white" onClick={() => setUpdateToastInfo(null)}>×</button>
+            </div>
+          </div>
+        )}
+
+        {/* Update modal */}
+        {isTauri && showUpdateModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setShowUpdateModal(false)} />
+            <div className="relative bg-gray-900 border border-gray-700 rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
+              <h3 className="text-lg font-semibold text-white">更新可用 {updateInfo?.version || ''}</h3>
+              {updateInfo?.notes && (
+                <pre className="mt-3 text-sm text-gray-300 whitespace-pre-wrap max-h-64 overflow-auto">{updateInfo.notes}</pre>
+              )}
+              <div className="mt-4">
+                {isDownloading && (
+                  <div>
+                    <div className="h-2 bg-gray-700 rounded">
+                      {(() => {
+                        const total = downloadProgress?.total || 0;
+                        const received = downloadProgress?.received || 0;
+                        const percent = total ? Math.min(100, Math.round((received / total) * 100)) : 0;
+                        return <div className="h-2 bg-blue-500 rounded" style={{ width: `${percent}%` }} />;
+                      })()}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-2">
+                      {downloadProgress?.total ? `${Math.round((downloadProgress.received / (downloadProgress.total || 1)) * 100)}%` : '下载中...'}
+                    </p>
+                  </div>
+                )}
+                {!isDownloading && !downloaded && (
+                  <div className="flex gap-2">
+                    <button className="px-3 py-2 rounded bg-green-600 hover:bg-green-700 text-white" onClick={startDownload}>下载</button>
+                    <button className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white" onClick={() => setShowUpdateModal(false)}>稍后</button>
+                  </div>
+                )}
+                {downloaded && (
+                  <div className="flex gap-2">
+                    <button className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white" onClick={restartToUpdate}>重新启动以更新</button>
+                  </div>
+                )}
+                {updateError && (
+                  <p className="text-xs text-red-400 mt-2">{updateError}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <header className="text-center mb-8">
           <div className="relative mb-4">
@@ -584,6 +745,23 @@ function App() {
               Clear {completedCount} completed task
               {completedCount > 1 ? "s" : ""}
             </button>
+          </div>
+        )}
+
+        {/* About / Settings */}
+        {isTauri && (
+          <div className="mt-8 text-center text-xs text-gray-400">
+            <span>版本 {appVersion || ""}</span>
+            <button
+              onClick={handleManualCheck}
+              disabled={isCheckingUpdate}
+              className={`ml-3 px-2 py-1 rounded border border-gray-600 hover:bg-gray-800 text-gray-200 ${isCheckingUpdate ? 'opacity-60 cursor-not-allowed' : ''}`}
+            >
+              {isCheckingUpdate ? '正在检查…' : '检查更新'}
+            </button>
+            {updateError && (
+              <span className="ml-3 text-red-400">{updateError}</span>
+            )}
           </div>
         )}
       </div>
