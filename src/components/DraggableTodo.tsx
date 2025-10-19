@@ -33,6 +33,7 @@ export default function DraggableTodo({ todo, onToggle, onDelete, readonly = fal
       ref={setNodeRef}
       style={style}
       className="bg-gray-800 rounded-lg p-3 shadow-sm hover:shadow-md transition-shadow"
+      data-testid="todo-item"
     >
       <div className="flex items-center gap-3">
         {/* Drag Handle */}
@@ -45,6 +46,7 @@ export default function DraggableTodo({ todo, onToggle, onDelete, readonly = fal
               : 'cursor-grab active:cursor-grabbing text-gray-400 hover:text-white'
           }`}
           title={readonly ? "历史数据 - 无法拖动" : "Drag to reorder"}
+          data-testid="todo-drag-handle"
         >
           <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
             <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
@@ -69,6 +71,7 @@ export default function DraggableTodo({ todo, onToggle, onDelete, readonly = fal
               ? "未来日期 - 无法标记完成"
               : undefined
           }
+          data-testid="todo-toggle"
         />
 
         {/* Todo Text */}

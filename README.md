@@ -52,6 +52,8 @@ A sleek, feature-rich todo application built with Tauri, React, and TypeScript. 
 - `pnpm preview` - Preview the production build
 - `pnpm tauri dev` - Run the Tauri app in development mode
 - `pnpm tauri build` - Build the Tauri app for production
+- `pnpm test:e2e` - Run Playwright end-to-end tests (headless)
+- `pnpm test:e2e:ui` - Run Playwright tests with UI runner
 
 ### Project Structure
 
@@ -118,6 +120,26 @@ pnpm tauri build
 The production build will generate:
 - Web application in `dist/`
 - Desktop application in `src-tauri/target/release/bundle/`
+
+## 🧪 End-to-End (E2E) Tests
+
+This project includes a Playwright test suite that exercises the core flows:
+- Adding tasks via the keyboard-friendly input
+- Completing/uncompleting tasks and verifying stats
+- Drag-and-drop reordering with persistence across reloads
+- Cross-window sync between the main view and the compact view (simulated for the SPA using BroadcastChannel)
+
+Run tests locally:
+```bash
+pnpm install
+npx playwright install --with-deps
+pnpm test:e2e
+```
+
+Notes:
+- Tests run against the Vite dev server at http://localhost:1420.
+- The app automatically switches to a browser-friendly storage stub when not running inside Tauri, and uses a per-test namespace via the `?testId=` query parameter for isolation.
+- Cross-window sync in the SPA is simulated using BroadcastChannel to mirror Tauri's event bus; the actual desktop app uses Tauri events for real multi-window sync.
 
 ## 🤝 Contributing
 
