@@ -17,6 +17,8 @@ function isTauri(): boolean {
 class TauriDatabaseService {
   private db: any | null = null;
   private initialized = false;
+  private static readonly STEP = 1000;
+  private static readonly MIN_GAP_THRESHOLD = 10;
 
   async init(): Promise<void> {
     try {
@@ -30,25 +32,46 @@ class TauriDatabaseService {
       // @ts-ignore dynamic module
       this.db = await (Database as any).load(dbPath);
 
+      // Pragmas for reliability and concurrency
+      await this.db.execute(`PRAGMA journal_mode=WAL;`);
+      await this.db.execute(`PRAGMA synchronous=NORMAL;`);
+      await this.db.execute(`PRAGMA foreign_keys=ON;`);
+      await this.db.execute(`PRAGMA busy_timeout=5000;`);
+
+      // Base table
       await this.db.execute(`
         CREATE TABLE IF NOT EXISTS todos (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           text TEXT NOT NULL,
           completed BOOLEAN NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL,
-          sort_order INTEGER NOT NULL DEFAULT 0
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          date_scope TEXT
         )
       `);
 
+      // Backward compatibility: older DBs may miss columns
       try {
-        await this.db.execute(`
-          ALTER TABLE todos ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0
-        `);
+        await this.db.execute(`ALTER TABLE todos ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`);
+      } catch {}
+      try {
+        await this.db.execute(`ALTER TABLE todos ADD COLUMN date_scope TEXT`);
       } catch {}
 
-      await this.db.execute(`
-        UPDATE todos SET sort_order = id WHERE sort_order = 0
-      `);
+      // Backfill date_scope for any existing rows
+      await this.db.execute(`UPDATE todos SET date_scope = DATE(created_at) WHERE date_scope IS NULL OR date_scope = ''`);
+
+      // If sort_order was 0 from legacy, give a deterministic order per day
+      // We pack per day with gaps to satisfy UNIQUE(date_scope, sort_order)
+      const dates = (await this.db.select(`SELECT DISTINCT date_scope as d FROM todos WHERE date_scope IS NOT NULL AND date_scope <> ''`)) as any[];
+      for (const row of dates) {
+        await this.canonicalizeDateScope(row.d);
+      }
+
+      // Indexes
+      await this.db.execute(`CREATE INDEX IF NOT EXISTS idx_todos_date_sort ON todos(date_scope, sort_order)`);
+      // Unique index may fail if duplicates exist; after canonicalization it should succeed
+      await this.db.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_todos_date_sort_unique ON todos(date_scope, sort_order)`);
 
       this.initialized = true;
     } catch (error) {
@@ -60,6 +83,43 @@ class TauriDatabaseService {
   private checkInitialized(): void {
     if (!this.initialized || !this.db) {
       throw new Error('Database not initialized');
+    }
+  }
+
+  private todayKey(): string {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  private async canonicalizeDateScope(dateScope: string): Promise<void> {
+    // Re-pack a date_scope so that sort_order values are spaced by STEP and unique
+    const rows = (await this.db.select(
+      `SELECT id, completed, sort_order, created_at FROM todos WHERE date_scope = ? ORDER BY completed ASC, sort_order ASC, created_at DESC`,
+      [dateScope]
+    )) as any[];
+    let i = 0;
+    const step = TauriDatabaseService.STEP;
+    const parts: string[] = [];
+    const ids: number[] = [];
+    for (const r of rows) {
+      const newSort = ++i * step; // start from step
+      parts.push(`WHEN ${Number(r.id)} THEN ${newSort}`);
+      ids.push(Number(r.id));
+    }
+    if (ids.length === 0) return;
+    const caseExpr = parts.join(' ');
+    const placeholders = ids.map(() => '?').join(',');
+    await this.db.execute(
+      `BEGIN IMMEDIATE`,
+    );
+    try {
+      await this.db.execute(
+        `UPDATE todos SET sort_order = CASE id ${caseExpr} END WHERE date_scope = ? AND id IN (${placeholders})`,
+        [dateScope, ...ids.map(String)]
+      );
+      await this.db.execute(`COMMIT`);
+    } catch (e) {
+      await this.db.execute(`ROLLBACK`);
+      throw e;
     }
   }
 
@@ -75,16 +135,19 @@ class TauriDatabaseService {
 
   async addTodo(text: string, date?: string): Promise<Todo> {
     this.checkInitialized();
-    const now = date ? new Date(date).toISOString() : new Date().toISOString();
+    const nowIso = date ? new Date(date).toISOString() : new Date().toISOString();
+    const dateKey = (date ? new Date(date) : new Date()).toISOString().split('T')[0];
+
     const maxSortResult = (await this.db.select(
-      `SELECT MAX(sort_order) as max_sort FROM todos WHERE completed = 0 AND DATE(created_at) = DATE(?)`,
-      [now]
+      `SELECT MAX(sort_order) as max_sort FROM todos WHERE completed = 0 AND date_scope = ?`,
+      [dateKey]
     )) as any[];
-    const nextSort = (maxSortResult[0]?.max_sort || 0) + 1;
+    const maxSort = Number(maxSortResult[0]?.max_sort || 0);
+    const nextSort = (maxSort > 0 ? maxSort : 0) + TauriDatabaseService.STEP;
 
     const result = (await this.db.select(
-      'INSERT INTO todos (text, completed, created_at, sort_order) VALUES (?, ?, ?, ?) RETURNING *',
-      [text, 0, now, nextSort]
+      'INSERT INTO todos (text, completed, created_at, sort_order, date_scope) VALUES (?, ?, ?, ?, ?) RETURNING *',
+      [text, 0, nowIso, nextSort, dateKey]
     )) as any[];
 
     const newTodo: Todo = {
@@ -128,34 +191,43 @@ class TauriDatabaseService {
 
   async toggleTodo(id: number): Promise<Todo> {
     this.checkInitialized();
-    const result = (await this.db.select('UPDATE todos SET completed = NOT completed WHERE id = ? RETURNING *', [String(id)])) as any[];
-    const updatedTodo: Todo = {
-      ...result[0],
-      completed: Boolean(result[0].completed),
-      createdAt: new Date(result[0].created_at),
-    };
+    await this.db.execute('BEGIN IMMEDIATE');
+    try {
+      const result = (await this.db.select('UPDATE todos SET completed = NOT completed WHERE id = ? RETURNING *', [String(id)])) as any[];
+      const row = result[0];
+      const updatedTodo: Todo = {
+        ...row,
+        completed: Boolean(row.completed),
+        createdAt: new Date(row.created_at),
+      };
 
-    await this.reorderAfterStatusChange();
-    await emit('todo-updated', { todo: updatedTodo, action: 'toggled' });
-    return updatedTodo;
-  }
+      const dateScope = row.date_scope || new Date(row.created_at).toISOString().split('T')[0];
+      // Move to the end of its new group with gaps
+      const group = updatedTodo.completed ? 1 : 0;
+      const maxRes = (await this.db.select(
+        'SELECT MAX(sort_order) as m FROM todos WHERE date_scope = ? AND completed = ?',
+        [dateScope, String(group)]
+      )) as any[];
+      const maxSort = Number(maxRes[0]?.m || 0);
+      const nextSort = (maxSort > 0 ? maxSort : 0) + TauriDatabaseService.STEP;
+      await this.db.execute('UPDATE todos SET sort_order = ? WHERE id = ?', [String(nextSort), String(id)]);
 
-  private async reorderAfterStatusChange(): Promise<void> {
-    const todos = (await this.db.select('SELECT id, completed FROM todos ORDER BY completed ASC, sort_order ASC, created_at DESC')) as any[];
-    const incompleteTodos = todos.filter((t) => !Boolean(t.completed));
-    const completedTodos = todos.filter((t) => Boolean(t.completed));
-
-    for (let i = 0; i < incompleteTodos.length; i++) {
-      await this.db.execute('UPDATE todos SET sort_order = ? WHERE id = ?', [String(i), String(incompleteTodos[i].id)]);
-    }
-    for (let i = 0; i < completedTodos.length; i++) {
-      await this.db.execute('UPDATE todos SET sort_order = ? WHERE id = ?', [String(incompleteTodos.length + i), String(completedTodos[i].id)]);
+      await this.db.execute('COMMIT');
+      await emit('todo-updated', { todo: updatedTodo, action: 'toggled' });
+      return updatedTodo;
+    } catch (e) {
+      await this.db.execute('ROLLBACK');
+      throw e;
     }
   }
 
   async getFirstTodo(): Promise<Todo | null> {
     this.checkInitialized();
-    const result = (await this.db.select('SELECT * FROM todos ORDER BY sort_order ASC, created_at DESC LIMIT 1')) as any[];
+    const today = this.todayKey();
+    const result = (await this.db.select(
+      'SELECT * FROM todos WHERE date_scope = ? AND completed = 0 ORDER BY sort_order ASC, created_at DESC LIMIT 1',
+      [today]
+    )) as any[];
     if (result.length > 0) {
       return { ...result[0], completed: Boolean(result[0].completed), createdAt: new Date(result[0].created_at) };
     }
@@ -164,39 +236,93 @@ class TauriDatabaseService {
 
   async reorderTodos(todoIds: number[]): Promise<void> {
     this.checkInitialized();
-    const todos = await this.getTodos();
-    const incomplete: number[] = [];
-    const completed: number[] = [];
-    todoIds.forEach((id) => {
-      const t = todos.find((x) => x.id === id);
-      if (!t) return;
-      if (t.completed) completed.push(id);
-      else incomplete.push(id);
-    });
+    if (todoIds.length === 0) return;
 
-    for (let i = 0; i < incomplete.length; i++) {
-      await this.db.execute('UPDATE todos SET sort_order = ? WHERE id = ?', [String(i), String(incomplete[i])]);
+    // Fetch metadata for ids
+    const placeholders = todoIds.map(() => '?').join(',');
+    const rows = (await this.db.select(
+      `SELECT id, completed, date_scope, sort_order, created_at FROM todos WHERE id IN (${placeholders})`,
+      todoIds.map(String)
+    )) as any[];
+    if (rows.length === 0) return;
+
+    // Group by date_scope (should be one in normal usage)
+    const byDate: Record<string, { inc: number[]; comp: number[] }> = {};
+    const statusById = new Map<number, { date: string; completed: boolean }>();
+    for (const r of rows) {
+      const date = r.date_scope || new Date(r.created_at).toISOString().split('T')[0];
+      statusById.set(Number(r.id), { date, completed: Boolean(r.completed) });
     }
-    for (let i = 0; i < completed.length; i++) {
-      await this.db.execute('UPDATE todos SET sort_order = ? WHERE id = ?', [String(incomplete.length + i), String(completed[i])]);
+    for (const id of todoIds) {
+      const meta = statusById.get(id);
+      if (!meta) continue;
+      if (!byDate[meta.date]) byDate[meta.date] = { inc: [], comp: [] };
+      if (meta.completed) byDate[meta.date].comp.push(id);
+      else byDate[meta.date].inc.push(id);
     }
+
+    await this.db.execute('BEGIN IMMEDIATE');
+    try {
+      for (const [date, parts] of Object.entries(byDate)) {
+        // Fetch the rest items for this date to keep stable order at the end
+        const rest = (await this.db.select(
+          `SELECT id, completed, sort_order, created_at FROM todos WHERE date_scope = ? ORDER BY completed ASC, sort_order ASC, created_at DESC`,
+          [date]
+        )) as any[];
+        const restInc: number[] = [];
+        const restComp: number[] = [];
+        for (const r of rest) {
+          const id = Number(r.id);
+          if (parts.inc.includes(id) || parts.comp.includes(id)) continue;
+          if (Boolean(r.completed)) restComp.push(id);
+          else restInc.push(id);
+        }
+
+        const finalOrder = [...parts.inc, ...restInc, ...parts.comp, ...restComp];
+        const step = TauriDatabaseService.STEP;
+        let i = 0;
+        const cases: string[] = [];
+        for (const id of finalOrder) {
+          const newSort = ++i * step;
+          cases.push(`WHEN ${id} THEN ${newSort}`);
+        }
+        const caseExpr = cases.join(' ');
+        const allIds = finalOrder;
+        if (allIds.length > 0) {
+          const idPlaceholders = allIds.map(() => '?').join(',');
+          await this.db.execute(
+            `UPDATE todos SET sort_order = CASE id ${caseExpr} END WHERE date_scope = ? AND id IN (${idPlaceholders})`,
+            [date, ...allIds.map(String)]
+          );
+        }
+
+        // Canonicalize if gaps are too small (optional here since we repack every time)
+      }
+      await this.db.execute('COMMIT');
+    } catch (e) {
+      await this.db.execute('ROLLBACK');
+      throw e;
+    }
+
     await emit('todos-reordered', { todoIds });
   }
 
   async getHistoricalDates(): Promise<string[]> {
     this.checkInitialized();
-    const result = (await this.db.select(`
-      SELECT DISTINCT DATE(created_at) as date
-      FROM todos
-      WHERE DATE(created_at) <= DATE('now', 'localtime')
-      ORDER BY date DESC
-    `)) as any[];
+    const today = this.todayKey();
+    const result = (await this.db.select(
+      `SELECT DISTINCT date_scope as date FROM todos WHERE date_scope <= ? ORDER BY date DESC`,
+      [today]
+    )) as any[];
     return result.map((row: any) => row.date);
   }
 
   async getTodosByDate(date: string): Promise<Todo[]> {
     this.checkInitialized();
-    const result = (await this.db.select('SELECT * FROM todos WHERE DATE(created_at) = ? ORDER BY completed ASC, sort_order ASC, created_at DESC', [date])) as any[];
+    const result = (await this.db.select(
+      'SELECT * FROM todos WHERE date_scope = ? ORDER BY completed ASC, sort_order ASC, created_at DESC',
+      [date]
+    )) as any[];
     return result.map((todo: any) => ({
       ...todo,
       completed: Boolean(todo.completed),
@@ -206,13 +332,54 @@ class TauriDatabaseService {
 
   async getFutureDates(): Promise<string[]> {
     this.checkInitialized();
-    const result = (await this.db.select(`
-      SELECT DISTINCT DATE(created_at) as date
-      FROM todos
-      WHERE DATE(created_at) > DATE('now', 'localtime')
-      ORDER BY date ASC
-    `)) as any[];
+    const today = this.todayKey();
+    const result = (await this.db.select(
+      `SELECT DISTINCT date_scope as date FROM todos WHERE date_scope > ? ORDER BY date ASC`,
+      [today]
+    )) as any[];
     return result.map((row: any) => row.date);
+  }
+
+  // Move a task to a different date scope and place at top or bottom of its completion group
+  async moveToDate(taskId: number, targetDate: string, position: 'top' | 'bottom' = 'bottom'): Promise<void> {
+    this.checkInitialized();
+    const dateKey = new Date(targetDate).toISOString().split('T')[0];
+    await this.db.execute('BEGIN IMMEDIATE');
+    try {
+      const rows = (await this.db.select('SELECT id, completed FROM todos WHERE id = ?', [String(taskId)])) as any[];
+      if (rows.length === 0) {
+        await this.db.execute('ROLLBACK');
+        return;
+      }
+      const completed = Boolean(rows[0].completed);
+      const group = completed ? 1 : 0;
+
+      if (position === 'bottom') {
+        const maxRes = (await this.db.select(
+          'SELECT MAX(sort_order) as m FROM todos WHERE date_scope = ? AND completed = ?',
+          [dateKey, String(group)]
+        )) as any[];
+        const maxSort = Number(maxRes[0]?.m || 0);
+        const nextSort = (maxSort > 0 ? maxSort : 0) + TauriDatabaseService.STEP;
+        await this.db.execute('UPDATE todos SET date_scope = ?, sort_order = ? WHERE id = ?', [dateKey, String(nextSort), String(taskId)]);
+      } else {
+        const minRes = (await this.db.select(
+          'SELECT MIN(sort_order) as m FROM todos WHERE date_scope = ? AND completed = ?',
+          [dateKey, String(group)]
+        )) as any[];
+        const minSort = Number(minRes[0]?.m || 0);
+        const newSort = (minSort || TauriDatabaseService.STEP) - TauriDatabaseService.STEP; // ensure it's at top
+        await this.db.execute('UPDATE todos SET date_scope = ?, sort_order = ? WHERE id = ?', [dateKey, String(newSort), String(taskId)]);
+        // Optionally repack to keep numbers positive and spaced
+        await this.canonicalizeDateScope(dateKey);
+      }
+
+      await this.db.execute('COMMIT');
+      await emit('todos-reordered', { todoIds: [taskId] });
+    } catch (e) {
+      await this.db.execute('ROLLBACK');
+      throw e;
+    }
   }
 }
 
@@ -246,6 +413,47 @@ class WebDatabaseService {
       localStorage.setItem(this.key, JSON.stringify(initial));
     }
     this.initialized = true;
+  }
+
+  async moveToDate(taskId: number, targetDate: string, position: 'top' | 'bottom' = 'bottom'): Promise<void> {
+    this.checkInitialized();
+    const data = this.read();
+    const targetKey = new Date(targetDate).toISOString().split('T')[0];
+    this.ensureDate(data, targetKey);
+
+    // Find and remove task from current date
+    let found: Todo | null = null;
+    let fromDate: string | null = null;
+    for (const [date, arr] of Object.entries(data.todos)) {
+      const idx = arr.findIndex((t) => t.id === taskId);
+      if (idx >= 0) {
+        found = arr.splice(idx, 1)[0];
+        fromDate = date;
+        break;
+      }
+    }
+    if (!found) return;
+
+    // Insert into target date at top/bottom of its completion group
+    const targetArr = data.todos[targetKey];
+    const groupArr = targetArr.filter((t) => t.completed === found!.completed);
+    if (position === 'bottom') {
+      const maxSort = groupArr.reduce((m, t) => Math.max(m, t.sort_order), 0);
+      found.sort_order = maxSort + 1;
+      targetArr.push(found);
+    } else {
+      const minSort = groupArr.reduce((m, t) => Math.min(m, t.sort_order), Infinity);
+      found.sort_order = isFinite(minSort) ? minSort - 1 : 0;
+      targetArr.push(found);
+      // Repack after inserting at top to keep numbers small
+      const inc = targetArr.filter((t) => !t.completed).sort((a, b) => a.sort_order - b.sort_order);
+      const comp = targetArr.filter((t) => t.completed).sort((a, b) => a.sort_order - b.sort_order);
+      const repack = [...inc, ...comp];
+      repack.forEach((t, i) => (t.sort_order = i));
+    }
+
+    this.write(data);
+    await emit('todos-reordered', { todoIds: [taskId] });
   }
 
   private checkInitialized(): void {
